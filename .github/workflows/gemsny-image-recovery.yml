@@ -1,0 +1,103 @@
+name: GemsNY Image Audit Recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gemsny-image-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  recover:
+    name: Recover shard ${{ matrix.shard }} slice ${{ matrix.slice }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [1,15]
+        slice: [0,1,2,3,4,5,6,7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - name: Run sliced recovery
+        run: |
+          mkdir -p output/recovery-${{ matrix.shard }}-${{ matrix.slice }}
+          python recover_missing.py \
+            --site 'https://www.gemsny.com' \
+            --sitemap 'https://www.gemsny.com/sitemap' \
+            --min-width 500 --min-height 500 --delay 2 \
+            --output-dir output/recovery-${{ matrix.shard }}-${{ matrix.slice }} \
+            --shard-index ${{ matrix.shard }} --shard-count 16 \
+            --slice-index ${{ matrix.slice }} --slice-count 8 \
+            --max-categories 0 --max-pages 0 --check-original
+      - name: Upload recovery slice
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: recovery-shard-${{ matrix.shard }}-slice-${{ matrix.slice }}
+          path: output/recovery-${{ matrix.shard }}-${{ matrix.slice }}/
+          if-no-files-found: warn
+          retention-days: 3
+
+  merge:
+    name: Build recovered final Excel
+    needs: recover
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'openpyxl>=3.1,<4'
+      - name: Download successful original shard artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: audit-shard-*
+          path: all_artifacts/original
+          run-id: 34590094393
+          github-token: ${{ github.token }}
+      - name: Remove incomplete original timed-out shards if present
+        run: |
+          rm -rf all_artifacts/original/audit-shard-1 || true
+          rm -rf all_artifacts/original/audit-shard-15 || true
+      - name: Download recovery slices
+        uses: actions/download-artifact@v5
+        with:
+          pattern: recovery-shard-*
+          path: all_artifacts/recovery
+      - name: Merge complete recovered audit
+        env:
+          EXPECTED_SHARDS: '16'
+        run: python merge.py all_artifacts recovered_final
+      - name: Validate completeness
+        run: |
+          python - <<'PY'
+          import json,sys
+          s=json.load(open('recovered_final/run_summary.json'))
+          print(json.dumps(s,indent=2))
+          if s.get('missing_shards'):
+              raise SystemExit(f"Missing shards remain: {s['missing_shards']}")
+          if s.get('images',0) <= 0 or s.get('categories',0) <= 0:
+              raise SystemExit('Recovered audit has no usable data')
+          PY
+      - name: Upload recovered final report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-GemsNY-Image-Audit-RECOVERED
+          path: recovered_final/
+          retention-days: 7
