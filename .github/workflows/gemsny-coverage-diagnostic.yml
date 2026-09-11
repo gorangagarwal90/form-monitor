@@ -1,0 +1,53 @@
+name: GemsNY Coverage Diagnostic Merge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gemsny-coverage-diagnostic.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  merge-diagnostic:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'openpyxl>=3.1,<4'
+      - name: Download recovered baseline
+        uses: actions/download-artifact@v5
+        with:
+          name: FINAL-GemsNY-Image-Audit-RECOVERED
+          path: baseline
+          github-token: ${{ github.token }}
+          run-id: 34626456374
+      - name: Download strict recovery shards from failed strict run
+        uses: actions/download-artifact@v5
+        with:
+          pattern: strict-coverage-*
+          path: strict_recovery
+          github-token: ${{ github.token }}
+          run-id: 34635973910
+      - name: Build diagnostic strict final even when validation fails
+        env:
+          EXPECTED_SHARDS: '16'
+        shell: bash
+        run: |
+          set +e
+          python coverage_merge.py baseline strict_recovery combined STRICT_FINAL
+          rc=$?
+          echo "coverage_merge exit=$rc; uploading diagnostic output regardless"
+          exit 0
+      - name: Upload diagnostic strict final
+        uses: actions/upload-artifact@v4
+        with:
+          name: DIAGNOSTIC-GemsNY-STRICT-FINAL
+          path: STRICT_FINAL/
+          retention-days: 2
