@@ -1,55 +1,69 @@
 import asyncio
-import csv
-from pathlib import Path
-from types import SimpleNamespace
+from playwright.async_api import async_playwright
 
-from audit import main
+URLS = [
+    'https://www.gemsny.com/sapphire-rings',
+    'https://www.gemsny.com/sapphire-earrings',
+]
 
-OUT = Path("qa_probe_output")
+async def inspect(page, url):
+    r = await page.goto(url, wait_until='domcontentloaded', timeout=60000)
+    await page.wait_for_timeout(4000)
+    print('\n=== PAGE ===', url)
+    print('STATUS', r.status if r else None)
+    print('TITLE', await page.title())
+    print('URL', page.url)
+    print('IMAGES', await page.evaluate('document.images.length'))
+    body = (await page.locator('body').inner_text())
+    print('BODY_HEAD', body[:3500].replace('\n',' | '))
 
-async def run():
-    args = SimpleNamespace(
-        site="https://www.gemsny.com",
-        sitemap="https://www.gemsny.com/sitemap",
-        min_width=500,
-        min_height=500,
-        delay=0,
-        output_dir=str(OUT),
-        shard_index=0,
-        shard_count=1,
-        max_categories=4,
-        max_pages=1,
-        check_original=True,
-    )
-    await main(args)
+    data = await page.evaluate(r'''()=>{
+      const abs=u=>{try{return new URL(u,location.href).href}catch(e){return''}};
+      const imgs=[...document.images];
+      return imgs.map((img,idx)=>{
+        let n=img, ctx=[];
+        for(let d=0;d<9&&n;d++,n=n.parentElement){
+          ctx.push({
+            d,
+            tag:n.tagName||'',
+            cls:(n.className&&String(n.className).slice(0,350))||'',
+            text:(n.innerText||'').trim().slice(0,900),
+            href:(n.matches&&n.matches('a[href]'))?n.href:''
+          });
+        }
+        return {
+          idx,
+          alt:(img.getAttribute('alt')||'').trim(),
+          src:abs(img.currentSrc||img.src||img.getAttribute('data-src')||''),
+          nw:img.naturalWidth||0,
+          nh:img.naturalHeight||0,
+          outer:img.outerHTML.slice(0,1800),
+          ctx
+        };
+      }).filter(x=>{
+        const hay=(x.alt+' '+x.src+' '+x.outer+' '+x.ctx.map(c=>c.text+' '+c.cls).join(' ')).toLowerCase();
+        return /sapphire|ring|earring|product|item#|sku/.test(hay) && !/logo|icon|social/.test(x.alt.toLowerCase());
+      }).slice(0,50);
+    }''')
 
-asyncio.run(run())
+    print('CANDIDATES', len(data))
+    for x in data[:25]:
+        print('\nIMG',x['idx'],'ALT=',x['alt'],'SRC=',x['src'],'NAT=',x['nw'],x['nh'])
+        print('OUTER=',x['outer'])
+        for c in x['ctx'][:8]:
+            if c['text'] or c['cls'] or c['href']:
+                print('CTX',c)
 
-with open(OUT / "all_images.csv", encoding="utf-8-sig", newline="") as f:
-    rows = list(csv.DictReader(f))
-with open(OUT / "coverage.csv", encoding="utf-8-sig", newline="") as f:
-    coverage = list(csv.DictReader(f))
+async def main():
+    async with async_playwright() as p:
+        b=await p.chromium.launch(headless=True)
+        c=await b.new_context(
+            viewport={'width':1440,'height':1200},
+            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36'
+        )
+        page=await c.new_page()
+        for u in URLS:
+            await inspect(page,u)
+        await c.close(); await b.close()
 
-print("QA_TOTAL_IMAGES", len(rows))
-print("QA_CATEGORY_COUNT", len(coverage))
-for c in coverage:
-    print("QA_CATEGORY", c)
-
-for r in rows[:8]:
-    print("QA_SAMPLE", {
-        "category": r.get("category_name"),
-        "sku": r.get("sku"),
-        "served": f"{r.get('served_width')}x{r.get('served_height')}",
-        "declared": f"{r.get('declared_src_width')}x{r.get('declared_src_height')}",
-        "original": f"{r.get('original_width')}x{r.get('original_height')}",
-        "status": r.get("status"),
-        "basis": r.get("compliance_basis"),
-    })
-
-assert len(coverage) == 4, f"QA FAILED: expected 4 category checks, got {len(coverage)}"
-bad = [c for c in coverage if c.get("status") in ("ERROR", "REVIEW - NO PRODUCT IMAGES")]
-assert not bad, f"QA FAILED: categories without usable product detection: {bad}"
-assert all(int(c.get("images_checked") or 0) > 0 for c in coverage), f"QA FAILED: zero-image category: {coverage}"
-assert len(rows) >= 40, f"QA FAILED: total detected product images unexpectedly low: {len(rows)}"
-assert all(int(r.get("original_width") or 0) > 0 and int(r.get("original_height") or 0) > 0 for r in rows[:20]), "QA FAILED: source dimensions unavailable"
-print("QA PASSED: loose-gem and jewelry category product images are being detected with readable source dimensions.")
+asyncio.run(main())
