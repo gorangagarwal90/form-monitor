@@ -5,9 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/gemsny-image-audit.yml'
+      - 'probe.py'
       - 'audit.py'
-      - 'merge.py'
-      - 'requirements.txt'
   workflow_dispatch:
     inputs:
       min_width:
@@ -39,11 +38,26 @@ on:
 permissions:
   contents: read
 
-env:
-  SHARD_COUNT: '16'
-
 jobs:
+  diagnostic:
+    if: github.event_name == 'push'
+    name: GemsNY one-page diagnostic
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Playwright
+        run: |
+          pip install 'playwright>=1.45,<2'
+          python -m playwright install --with-deps chromium
+      - name: Inspect live Sapphire page
+        run: python probe.py
+
   audit:
+    if: github.event_name == 'workflow_dispatch'
     name: Audit shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
@@ -52,6 +66,8 @@ jobs:
       max-parallel: 2
       matrix:
         shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    env:
+      SHARD_COUNT: '16'
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -64,20 +80,15 @@ jobs:
       - name: Run audit shard
         shell: bash
         run: |
-          if [ '${{ github.event_name }}' = 'push' ]; then
-            MIN_W='500'; MIN_H='500'; MAX_CATEGORIES='4'; MAX_PAGES='2'; CHECK='--check-original'
-          else
-            MIN_W='${{ inputs.min_width }}'; MIN_H='${{ inputs.min_height }}'; MAX_CATEGORIES='${{ inputs.max_categories }}'; MAX_PAGES='${{ inputs.max_pages }}'
-            if [ '${{ inputs.check_original }}' = 'true' ]; then CHECK='--check-original'; else CHECK='--no-check-original'; fi
-          fi
+          if [ '${{ inputs.check_original }}' = 'true' ]; then CHECK='--check-original'; else CHECK='--no-check-original'; fi
           mkdir -p output/shard-${{ matrix.shard }}
           python audit.py \
             --site 'https://www.gemsny.com' \
             --sitemap 'https://www.gemsny.com/sitemap' \
-            --min-width "$MIN_W" --min-height "$MIN_H" --delay 2 \
+            --min-width '${{ inputs.min_width }}' --min-height '${{ inputs.min_height }}' --delay 2 \
             --output-dir output/shard-${{ matrix.shard }} \
             --shard-index ${{ matrix.shard }} --shard-count "$SHARD_COUNT" \
-            --max-categories "$MAX_CATEGORIES" --max-pages "$MAX_PAGES" $CHECK
+            --max-categories '${{ inputs.max_categories }}' --max-pages '${{ inputs.max_pages }}' $CHECK
       - name: Upload shard
         if: always()
         uses: actions/upload-artifact@v4
@@ -88,9 +99,9 @@ jobs:
           retention-days: 1
 
   merge:
+    if: github.event_name == 'workflow_dispatch' && always()
     name: Build final Excel
     needs: audit
-    if: always()
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
