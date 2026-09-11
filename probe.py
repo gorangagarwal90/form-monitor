@@ -1,48 +1,50 @@
 import asyncio
-from playwright.async_api import async_playwright
+import csv
+from pathlib import Path
+from types import SimpleNamespace
 
-URL='https://www.gemsny.com/sapphires/basic-search'
+from audit import main
 
-async def main():
-    async with async_playwright() as p:
-        b=await p.chromium.launch(headless=True)
-        c=await b.new_context(
-            viewport={'width':1440,'height':1200},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/151 Safari/537.36'
-        )
-        page=await c.new_page()
-        r=await page.goto(URL,wait_until='domcontentloaded',timeout=60000)
-        await page.wait_for_timeout(3000)
-        print('STATUS',r.status if r else None)
-        print('IMAGES',await page.evaluate('document.images.length'))
+OUT = Path('qa_probe_output')
 
-        candidates=await page.evaluate(r'''()=>{
-          const imgs=[...document.images];
-          return imgs.map((i,idx)=>{
-            const src=i.currentSrc||i.src||i.getAttribute('data-src')||i.getAttribute('data-lazy-src')||'';
-            const alt=(i.getAttribute('alt')||'').trim();
-            let n=i, contexts=[];
-            for(let d=0;d<7&&n;d++,n=n.parentElement){
-              contexts.push({
-                d,
-                tag:n.tagName||'',
-                cls:(n.className&&String(n.className).slice(0,300))||'',
-                text:(n.innerText||'').trim().slice(0,500),
-                href:(n.matches&&n.matches('a[href]'))?n.href:''
-              });
-            }
-            return {idx,src,alt,nw:i.naturalWidth||0,nh:i.naturalHeight||0,outer:i.outerHTML.slice(0,1500),contexts};
-          }).filter(x=>
-            /images-stones|images-jewelry|91042|74131|63682/i.test(x.src+' '+x.alt+' '+x.outer+' '+x.contexts.map(c=>c.text).join(' '))
-          ).slice(0,30);
-        }''')
-        print('PRODUCTISH_COUNT',len(candidates))
-        for x in candidates:
-            print('\nPRODUCT_IMG',x['idx'],'ALT=',x['alt'],'SRC=',x['src'],'NAT=',x['nw'],x['nh'])
-            print('OUTER=',x['outer'])
-            for ctx in x['contexts']:
-                print('CTX',ctx)
+async def run():
+    args = SimpleNamespace(
+        site='https://www.gemsny.com',
+        sitemap='https://www.gemsny.com/sitemap',
+        min_width=500,
+        min_height=500,
+        delay=0,
+        output_dir=str(OUT),
+        shard_index=0,
+        shard_count=1,
+        max_categories=1,
+        max_pages=1,
+        check_original=True,
+    )
+    await main(args)
 
-        await c.close(); await b.close()
+asyncio.run(run())
 
-asyncio.run(main())
+with open(OUT / 'all_images.csv', encoding='utf-8-sig', newline='') as f:
+    rows = list(csv.DictReader(f))
+with open(OUT / 'coverage.csv', encoding='utf-8-sig', newline='') as f:
+    coverage = list(csv.DictReader(f))
+
+print('QA_IMAGE_ROWS', len(rows))
+print('QA_COVERAGE', coverage)
+for r in rows[:5]:
+    print('QA_SAMPLE', {
+        'sku': r.get('sku'),
+        'served': f"{r.get('served_width')}x{r.get('served_height')}",
+        'declared': f"{r.get('declared_src_width')}x{r.get('declared_src_height')}",
+        'original': f"{r.get('original_width')}x{r.get('original_height')}",
+        'status': r.get('status'),
+        'basis': r.get('compliance_basis'),
+        'image': r.get('image_url'),
+    })
+
+# Hard guardrails: the workflow must fail if the scraper silently stops finding products.
+assert len(rows) >= 20, f'QA FAILED: expected at least 20 product images, got {len(rows)}'
+assert coverage and int(coverage[0].get('unique_products_detected') or 0) >= 20, 'QA FAILED: product coverage too low'
+assert all(int(r.get('original_width') or 0) > 0 and int(r.get('original_height') or 0) > 0 for r in rows[:10]), 'QA FAILED: source dimensions unavailable'
+print('QA PASSED: live GemsNY product images are being detected and source dimensions are readable.')
