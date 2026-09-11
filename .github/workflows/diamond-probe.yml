@@ -17,4 +17,12 @@ jobs:
       - run: |
           pip install 'playwright>=1.45,<2'
           python -m playwright install --with-deps chromium
-      - run: python diamond_probe.py
+      - name: Run probe to file
+        run: python diamond_probe.py > diamond_probe_output.txt 2>&1
+      - name: Upload probe output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: diamond-probe-output
+          path: diamond_probe_output.txt
+          retention-days: 1
