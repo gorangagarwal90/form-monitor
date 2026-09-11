@@ -1,0 +1,99 @@
+name: GemsNY Diamond API Recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'diamond-api-recovery.flag'
+      - 'diamond_api_recovery.py'
+      - 'diamond_targets.csv'
+      - '.github/workflows/gemsny-diamond-api-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  snapshot:
+    name: Snapshot diamond inventories
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install snapshot dependencies
+        run: |
+          pip install 'playwright>=1.45,<2' 'httpx>=0.27,<1' 'pillow>=10,<12'
+          python -m playwright install --with-deps chromium
+      - name: Build exact backend inventory snapshot
+        run: python diamond_api_recovery.py prep --targets diamond_targets.csv --output-dir diamond_snapshot --page-size 500
+      - uses: actions/upload-artifact@v4
+        with:
+          name: diamond-inventory-snapshot
+          path: diamond_snapshot/
+          retention-days: 2
+
+  audit:
+    name: Diamond source audit shard ${{ matrix.shard }}
+    needs: snapshot
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'httpx>=0.27,<1' 'pillow>=10,<12' 'playwright>=1.45,<2'
+      - uses: actions/download-artifact@v5
+        with:
+          name: diamond-inventory-snapshot
+          path: diamond_snapshot
+      - name: Audit exact product source images
+        run: |
+          mkdir -p diamond_output/shard-${{ matrix.shard }}
+          python diamond_api_recovery.py audit \
+            --snapshot diamond_snapshot/diamond_snapshot.json \
+            --output-dir diamond_output/shard-${{ matrix.shard }} \
+            --shard-index ${{ matrix.shard }} --shard-count 16 \
+            --concurrency 24 --min-width 500 --min-height 500
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: diamond-api-shard-${{ matrix.shard }}
+          path: diamond_output/shard-${{ matrix.shard }}/
+          retention-days: 2
+
+  merge:
+    name: Validate diamond recovery
+    needs: [snapshot, audit]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v5
+        with:
+          name: diamond-inventory-snapshot
+          path: diamond_snapshot
+      - uses: actions/download-artifact@v5
+        with:
+          pattern: diamond-api-shard-*
+          path: diamond_shards
+      - name: Strict merge validation
+        run: python diamond_api_recovery.py merge --snapshot diamond_snapshot/diamond_snapshot.json --input-dir diamond_shards --output-dir diamond_final --shard-count 16
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: DIAMOND-API-RECOVERY-FINAL
+          path: diamond_final/
+          retention-days: 3
