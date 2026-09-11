@@ -1,0 +1,27 @@
+name: GemsNY Non-Diamond Grid Probe
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'non_diamond_probe.py'
+      - '.github/workflows/non-diamond-probe.yml'
+  workflow_dispatch:
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: |
+          pip install 'playwright>=1.45,<2'
+          python -m playwright install --with-deps chromium
+      - run: python non_diamond_probe.py > non_diamond_probe_output.txt 2>&1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: non-diamond-probe-output
+          path: non_diamond_probe_output.txt
+          retention-days: 1
