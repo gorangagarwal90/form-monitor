@@ -7,6 +7,7 @@ on:
       - '.github/workflows/gemsny-image-audit.yml'
       - 'probe.py'
       - 'audit.py'
+      - 'full-audit.flag'
   workflow_dispatch:
     inputs:
       min_width:
@@ -38,10 +39,13 @@ on:
 permissions:
   contents: read
 
+env:
+  FULL_AUDIT_MARKER: 'START FULL GEMSNY IMAGE AUDIT'
+
 jobs:
   diagnostic:
-    if: github.event_name == 'push'
-    name: GemsNY one-page diagnostic
+    if: github.event_name == 'push' && !contains(github.event.head_commit.message, 'START FULL GEMSNY IMAGE AUDIT')
+    name: GemsNY diagnostic QA
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
@@ -53,11 +57,11 @@ jobs:
         run: |
           pip install 'playwright>=1.45,<2'
           python -m playwright install --with-deps chromium
-      - name: Inspect live Sapphire page
+      - name: Run validation probe
         run: python probe.py
 
   audit:
-    if: github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, 'START FULL GEMSNY IMAGE AUDIT'))
     name: Audit shard ${{ matrix.shard }}
     runs-on: ubuntu-latest
     timeout-minutes: 350
@@ -80,15 +84,27 @@ jobs:
       - name: Run audit shard
         shell: bash
         run: |
-          if [ '${{ inputs.check_original }}' = 'true' ]; then CHECK='--check-original'; else CHECK='--no-check-original'; fi
+          if [ '${{ github.event_name }}' = 'push' ]; then
+            MIN_W='500'
+            MIN_H='500'
+            MAX_CATEGORIES='0'
+            MAX_PAGES='0'
+            CHECK='--check-original'
+          else
+            MIN_W='${{ inputs.min_width }}'
+            MIN_H='${{ inputs.min_height }}'
+            MAX_CATEGORIES='${{ inputs.max_categories }}'
+            MAX_PAGES='${{ inputs.max_pages }}'
+            if [ '${{ inputs.check_original }}' = 'true' ]; then CHECK='--check-original'; else CHECK='--no-check-original'; fi
+          fi
           mkdir -p output/shard-${{ matrix.shard }}
           python audit.py \
             --site 'https://www.gemsny.com' \
             --sitemap 'https://www.gemsny.com/sitemap' \
-            --min-width '${{ inputs.min_width }}' --min-height '${{ inputs.min_height }}' --delay 2 \
+            --min-width "$MIN_W" --min-height "$MIN_H" --delay 2 \
             --output-dir output/shard-${{ matrix.shard }} \
             --shard-index ${{ matrix.shard }} --shard-count "$SHARD_COUNT" \
-            --max-categories '${{ inputs.max_categories }}' --max-pages '${{ inputs.max_pages }}' $CHECK
+            --max-categories "$MAX_CATEGORIES" --max-pages "$MAX_PAGES" $CHECK
       - name: Upload shard
         if: always()
         uses: actions/upload-artifact@v4
@@ -99,10 +115,11 @@ jobs:
           retention-days: 1
 
   merge:
-    if: github.event_name == 'workflow_dispatch' && always()
+    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, 'START FULL GEMSNY IMAGE AUDIT'))) && always()
     name: Build final Excel
     needs: audit
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
