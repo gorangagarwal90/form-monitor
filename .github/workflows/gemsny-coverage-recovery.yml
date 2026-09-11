@@ -1,0 +1,107 @@
+name: GemsNY Strict Coverage Recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gemsny-coverage-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  prep:
+    name: Prepare unresolved coverage targets
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/download-artifact@v5
+        with:
+          name: FINAL-GemsNY-Image-Audit-RECOVERED
+          path: baseline
+          github-token: ${{ github.token }}
+          run-id: 34626456374
+      - uses: actions/upload-artifact@v4
+        with:
+          name: coverage-target-source
+          path: baseline/coverage.csv
+          retention-days: 2
+
+  recover:
+    name: Strict coverage shard ${{ matrix.shard }}
+    needs: prep
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 16
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          python -m playwright install --with-deps chromium
+      - uses: actions/download-artifact@v5
+        with:
+          name: coverage-target-source
+          path: target
+      - name: Re-audit every unresolved category without page/category limits
+        run: |
+          mkdir -p output/shard-${{ matrix.shard }}
+          python coverage_recovery.py \
+            --coverage-file target/coverage.csv \
+            --output-dir output/shard-${{ matrix.shard }} \
+            --shard-index ${{ matrix.shard }} \
+            --shard-count 16 \
+            --min-width 500 --min-height 500 --delay 1
+      - name: Upload strict recovery shard
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-coverage-${{ matrix.shard }}
+          path: output/shard-${{ matrix.shard }}/
+          if-no-files-found: warn
+          retention-days: 2
+
+  merge:
+    name: Build strictly validated final Excel
+    needs: recover
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'openpyxl>=3.1,<4'
+      - name: Download recovered baseline
+        uses: actions/download-artifact@v5
+        with:
+          name: FINAL-GemsNY-Image-Audit-RECOVERED
+          path: baseline
+          github-token: ${{ github.token }}
+          run-id: 34626456374
+      - name: Download strict recovery shards
+        uses: actions/download-artifact@v5
+        with:
+          pattern: strict-coverage-*
+          path: strict_recovery
+      - name: Replace unresolved baseline categories and validate everything
+        env:
+          EXPECTED_SHARDS: '16'
+        run: python coverage_merge.py baseline strict_recovery combined STRICT_FINAL
+      - name: Upload strictly validated final report
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-GemsNY-Image-Audit-STRICT
+          path: STRICT_FINAL/
+          retention-days: 7
