@@ -17,10 +17,10 @@ async def main():
       print(f'==={label} STATUS=== {r.status}')
       text=await r.text()
       print(text[:50000])
-    # DOM sample to correlate API fields with rendered source image.
     sample=await page.evaluate(r'''() => [...document.querySelectorAll('.GridProductInner, [class*="GridProductInner"]')].slice(0,3).map(e=>({text:(e.innerText||'').slice(0,1000),html:e.outerHTML.slice(0,6000)}))''')
     print('===DOM SAMPLE===')
     print(json.dumps(sample,indent=2))
     await browser.close()
 
+# Recovery diagnostic rerun 2026-09-12
 asyncio.run(main())
