@@ -51,3 +51,5 @@ jobs:
           name: DIAGNOSTIC-GemsNY-STRICT-FINAL
           path: STRICT_FINAL/
           retention-days: 2
+
+# Trigger diagnostic merge after strict recovery validation failure.
