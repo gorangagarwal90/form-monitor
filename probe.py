@@ -18,8 +18,8 @@ async def run():
         output_dir=str(OUT),
         shard_index=0,
         shard_count=1,
-        max_categories=4,
-        max_pages=1,
+        max_categories=1,
+        max_pages=2,
         check_original=True,
     )
     await main(args)
@@ -32,36 +32,17 @@ with open(OUT / "all_images.csv", encoding="utf-8-sig", newline="") as f:
 with open(OUT / "coverage.csv", encoding="utf-8-sig", newline="") as f:
     coverage = list(csv.DictReader(f))
 
-print("QA_TOTAL_IMAGES", len(rows))
-print("QA_CATEGORY_COUNT", len(coverage))
-for category in coverage:
-    print("QA_CATEGORY", category)
+print("PAGINATION_QA_IMAGES", len(rows))
+print("PAGINATION_QA_COVERAGE", coverage)
+print("PAGE_COUNTS", sorted({r.get('page_number') for r in rows}))
 
-for row in rows[:10]:
-    print("QA_SAMPLE", {
-        "category": row.get("category_name"),
-        "family": row.get("card_family"),
-        "sku": row.get("sku"),
-        "served": f"{row.get('served_width')}x{row.get('served_height')}",
-        "declared": f"{row.get('declared_src_width')}x{row.get('declared_src_height')}",
-        "original": f"{row.get('original_width')}x{row.get('original_height')}",
-        "status": row.get("status"),
-        "basis": row.get("compliance_basis"),
-    })
+assert len(coverage) == 1, f"QA FAILED: expected one category, got {len(coverage)}"
+c = coverage[0]
+assert int(c.get("pages_visited") or 0) == 2, f"QA FAILED: expected 2 pages visited, got {c}"
+assert c.get("status") == "PARTIAL - PAGE LIMIT", f"QA FAILED: pagination status wrong: {c}"
+assert str(c.get("pagination_detected")).lower() == "true", f"QA FAILED: numeric pagination not detected: {c}"
+assert len(rows) >= 40, f"QA FAILED: second page did not add enough product images: {len(rows)}"
+assert len({r.get('product_key') for r in rows if r.get('product_key')}) >= 40, "QA FAILED: duplicate/repeated first page detected"
+assert {r.get('page_number') for r in rows} >= {'1', '2'}, "QA FAILED: rows were not recorded from both pages"
 
-assert len(coverage) == 4, f"QA FAILED: expected 4 category checks, got {len(coverage)}"
-bad = [
-    c for c in coverage
-    if c.get("status") in ("ERROR", "REVIEW - NO PRODUCT IMAGES")
-]
-assert not bad, f"QA FAILED: categories without usable product detection: {bad}"
-assert all(int(c.get("images_checked") or 0) > 0 for c in coverage), f"QA FAILED: zero-image category: {coverage}"
-assert len(rows) >= 40, f"QA FAILED: total detected product images unexpectedly low: {len(rows)}"
-assert any(r.get("card_family") == "LOOSE_CARD" for r in rows), "QA FAILED: loose-stone cards missing"
-assert any(r.get("card_family") == "JEWELRY_CARD" for r in rows), "QA FAILED: jewelry cards missing"
-assert all(
-    int(r.get("original_width") or 0) > 0 and int(r.get("original_height") or 0) > 0
-    for r in rows[:20]
-), "QA FAILED: source dimensions unavailable"
-
-print("QA PASSED: loose-gem and jewelry product images are being detected with readable source dimensions.")
+print("QA PASSED: numeric pagination advances to page 2 and captures new product images.")
