@@ -12,45 +12,43 @@ async def inspect(page, url):
     print('\n=== PAGE ===', url)
     print('STATUS', r.status if r else None)
     print('TITLE', await page.title())
-    print('URL', page.url)
     print('IMAGES', await page.evaluate('document.images.length'))
-    body = (await page.locator('body').inner_text())
-    print('BODY_HEAD', body[:3500].replace('\n',' | '))
 
     data = await page.evaluate(r'''()=>{
       const abs=u=>{try{return new URL(u,location.href).href}catch(e){return''}};
-      const imgs=[...document.images];
-      return imgs.map((img,idx)=>{
+      return [...document.images].map((img,idx)=>{
         let n=img, ctx=[];
-        for(let d=0;d<9&&n;d++,n=n.parentElement){
+        for(let d=0;d<10&&n;d++,n=n.parentElement){
           ctx.push({
             d,
             tag:n.tagName||'',
-            cls:(n.className&&String(n.className).slice(0,350))||'',
-            text:(n.innerText||'').trim().slice(0,900),
+            cls:(n.className&&String(n.className).slice(0,500))||'',
+            text:(n.innerText||'').trim().slice(0,1200),
             href:(n.matches&&n.matches('a[href]'))?n.href:''
           });
         }
+        const src=abs(img.currentSrc||img.src||img.getAttribute('data-src')||img.getAttribute('data-lazy-src')||'');
+        const alt=(img.getAttribute('alt')||'').trim();
+        const text=ctx.map(c=>c.text).join(' ');
         return {
-          idx,
-          alt:(img.getAttribute('alt')||'').trim(),
-          src:abs(img.currentSrc||img.src||img.getAttribute('data-src')||''),
-          nw:img.naturalWidth||0,
-          nh:img.naturalHeight||0,
-          outer:img.outerHTML.slice(0,1800),
-          ctx
+          idx, alt, src,
+          nw:img.naturalWidth||0, nh:img.naturalHeight||0,
+          outer:img.outerHTML.slice(0,2200), ctx, text
         };
       }).filter(x=>{
-        const hay=(x.alt+' '+x.src+' '+x.outer+' '+x.ctx.map(c=>c.text+' '+c.cls).join(' ')).toLowerCase();
-        return /sapphire|ring|earring|product|item#|sku/.test(hay) && !/logo|icon|social/.test(x.alt.toLowerCase());
-      }).slice(0,50);
+        const big=Math.max(x.nw,x.nh)>=120;
+        const productContext=/View\s*Details/i.test(x.text);
+        const asset=/jewelry|ring|earring|preset|product/i.test(x.src+' '+x.alt+' '+x.outer);
+        const menu=/mega_menus|item-image/i.test(x.src+' '+x.outer);
+        return big && !menu && (productContext || asset);
+      }).slice(0,80);
     }''')
 
-    print('CANDIDATES', len(data))
-    for x in data[:25]:
+    print('PRODUCT_CANDIDATES', len(data))
+    for x in data[:40]:
         print('\nIMG',x['idx'],'ALT=',x['alt'],'SRC=',x['src'],'NAT=',x['nw'],x['nh'])
         print('OUTER=',x['outer'])
-        for c in x['ctx'][:8]:
+        for c in x['ctx'][:9]:
             if c['text'] or c['cls'] or c['href']:
                 print('CTX',c)
 
