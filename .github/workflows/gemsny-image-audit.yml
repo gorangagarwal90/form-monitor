@@ -1,0 +1,171 @@
+name: GemsNY Image Audit - Free Cloud
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gemsny-image-audit.yml'
+      - 'auditor_package.zip.b64'
+  workflow_dispatch:
+    inputs:
+      min_width:
+        description: 'Minimum image width in pixels'
+        required: true
+        default: '500'
+        type: string
+      min_height:
+        description: 'Minimum image height in pixels'
+        required: true
+        default: '500'
+        type: string
+      check_original:
+        description: 'Also check likely original/source image URL'
+        required: true
+        default: true
+        type: boolean
+      deep_pdp:
+        description: 'Also audit substantial PDP images (much slower)'
+        required: true
+        default: false
+        type: boolean
+      max_categories:
+        description: 'Category limit for testing only. 0 = full site'
+        required: true
+        default: '0'
+        type: string
+      max_pages:
+        description: 'Pages per category limit for testing only. 0 = all pages'
+        required: true
+        default: '0'
+        type: string
+
+permissions:
+  contents: read
+
+env:
+  SHARD_COUNT: '16'
+
+jobs:
+  audit:
+    name: Audit shard ${{ matrix.shard }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack auditor
+        run: |
+          base64 -d auditor_package.zip.b64 > auditor_package.zip
+          unzip -q auditor_package.zip -d auditor
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Python packages
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r auditor/requirements.txt
+
+      - name: Install Chromium
+        run: python -m playwright install --with-deps chromium
+
+      - name: Run GemsNY audit shard
+        shell: bash
+        run: |
+          if [ '${{ github.event_name }}' = 'push' ]; then
+            MIN_W='500'
+            MIN_H='500'
+            CHECK_ORIGINAL='true'
+            DEEP_PDP='false'
+            MAX_CATEGORIES='4'
+            MAX_PAGES='2'
+          else
+            MIN_W='${{ inputs.min_width }}'
+            MIN_H='${{ inputs.min_height }}'
+            CHECK_ORIGINAL='${{ inputs.check_original }}'
+            DEEP_PDP='${{ inputs.deep_pdp }}'
+            MAX_CATEGORIES='${{ inputs.max_categories }}'
+            MAX_PAGES='${{ inputs.max_pages }}'
+          fi
+
+          mkdir -p output
+          python auditor/cloud_auditor.py \
+            --site 'https://www.gemsny.com' \
+            --sitemap 'https://www.gemsny.com/sitemap' \
+            --min-width "$MIN_W" \
+            --min-height "$MIN_H" \
+            --delay '2.0' \
+            --output-dir 'output' \
+            --shard-index '${{ matrix.shard }}' \
+            --shard-count "$SHARD_COUNT" \
+            --max-categories "$MAX_CATEGORIES" \
+            --max-pages "$MAX_PAGES" \
+            --deep-pdp "$DEEP_PDP" \
+            --check-original "$CHECK_ORIGINAL"
+
+      - name: Upload shard results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: audit-shard-${{ matrix.shard }}
+          path: |
+            output/**/all_images.csv
+            output/**/failed_images.csv
+            output/**/coverage.csv
+            output/**/category_summary.csv
+            output/**/state.json
+            output/**/shard_info.json
+            output/**/audit.log
+          if-no-files-found: warn
+          retention-days: 1
+
+  merge:
+    name: Build final audit workbook
+    needs: audit
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Unpack auditor
+        run: |
+          base64 -d auditor_package.zip.b64 > auditor_package.zip
+          unzip -q auditor_package.zip -d auditor
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install Excel package
+        run: pip install 'openpyxl>=3.1,<4'
+
+      - name: Download shard artifacts
+        uses: actions/download-artifact@v5
+        with:
+          pattern: audit-shard-*
+          path: shard_artifacts
+
+      - name: Merge results
+        env:
+          EXPECTED_SHARDS: '16'
+        run: python auditor/merge_reports.py shard_artifacts final_report
+
+      - name: Upload FINAL GemsNY audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-GemsNY-Image-Audit
+          path: final_report/
+          retention-days: 7
