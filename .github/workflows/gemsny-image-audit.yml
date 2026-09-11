@@ -9,32 +9,6 @@ on:
       - 'audit.py'
       - 'full-audit.flag'
   workflow_dispatch:
-    inputs:
-      min_width:
-        description: 'Minimum image width in pixels'
-        required: true
-        default: '500'
-        type: string
-      min_height:
-        description: 'Minimum image height in pixels'
-        required: true
-        default: '500'
-        type: string
-      check_original:
-        description: 'Also check likely original/source image URL'
-        required: true
-        default: true
-        type: boolean
-      max_categories:
-        description: 'Category limit for testing only. 0 = full site'
-        required: true
-        default: '0'
-        type: string
-      max_pages:
-        description: 'Pages per category limit for testing only. 0 = all pages'
-        required: true
-        default: '0'
-        type: string
 
 permissions:
   contents: read
@@ -67,7 +41,7 @@ jobs:
     timeout-minutes: 350
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 16
       matrix:
         shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15]
     env:
@@ -84,27 +58,14 @@ jobs:
       - name: Run audit shard
         shell: bash
         run: |
-          if [ '${{ github.event_name }}' = 'push' ]; then
-            MIN_W='500'
-            MIN_H='500'
-            MAX_CATEGORIES='0'
-            MAX_PAGES='0'
-            CHECK='--check-original'
-          else
-            MIN_W='${{ inputs.min_width }}'
-            MIN_H='${{ inputs.min_height }}'
-            MAX_CATEGORIES='${{ inputs.max_categories }}'
-            MAX_PAGES='${{ inputs.max_pages }}'
-            if [ '${{ inputs.check_original }}' = 'true' ]; then CHECK='--check-original'; else CHECK='--no-check-original'; fi
-          fi
           mkdir -p output/shard-${{ matrix.shard }}
           python audit.py \
             --site 'https://www.gemsny.com' \
             --sitemap 'https://www.gemsny.com/sitemap' \
-            --min-width "$MIN_W" --min-height "$MIN_H" --delay 2 \
+            --min-width 500 --min-height 500 --delay 2 \
             --output-dir output/shard-${{ matrix.shard }} \
             --shard-index ${{ matrix.shard }} --shard-count "$SHARD_COUNT" \
-            --max-categories "$MAX_CATEGORIES" --max-pages "$MAX_PAGES" $CHECK
+            --max-categories 0 --max-pages 0 --check-original
       - name: Upload shard
         if: always()
         uses: actions/upload-artifact@v4
@@ -115,7 +76,7 @@ jobs:
           retention-days: 1
 
   merge:
-    if: (github.event_name == 'workflow_dispatch' || (github.event_name == 'push' && contains(github.event.head_commit.message, 'START FULL GEMSNY IMAGE AUDIT'))) && always()
+    if: always() && (github.event_name == 'workflow_dispatch' || contains(github.event.head_commit.message, 'START FULL GEMSNY IMAGE AUDIT'))
     name: Build final Excel
     needs: audit
     runs-on: ubuntu-latest
