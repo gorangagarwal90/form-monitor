@@ -1,0 +1,89 @@
+name: GemsNY Final Whole-Site Image Audit Merge
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/gemsny-final-audit-merge.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  final-merge:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install merge dependencies
+        run: pip install 'playwright>=1.45,<2' 'requests>=2.31,<3' 'Pillow>=10,<12' 'xlsxwriter>=3.2,<4'
+
+      - name: Download recovered 700-category baseline
+        uses: actions/download-artifact@v5
+        with:
+          name: FINAL-GemsNY-Image-Audit-RECOVERED
+          path: baseline
+          github-token: ${{ github.token }}
+          run-id: 34626456374
+
+      - name: Download strict diamond inventory snapshot
+        uses: actions/download-artifact@v5
+        with:
+          name: diamond-inventory-snapshot
+          path: diamond_snapshot
+          github-token: ${{ github.token }}
+          run-id: 34666799478
+
+      - name: Download all 16 strict diamond shards
+        uses: actions/download-artifact@v5
+        with:
+          pattern: diamond-api-shard-*
+          path: diamond_shards
+          github-token: ${{ github.token }}
+          run-id: 34666799478
+
+      - name: Rebuild and strictly validate 27-category diamond recovery
+        run: |
+          python diamond_api_recovery_v2.py merge \
+            --snapshot diamond_snapshot/diamond_snapshot.json \
+            --input-dir diamond_shards \
+            --output-dir DIAMOND_FINAL \
+            --shard-count 16
+
+      - name: Download 8 API exception categories
+        uses: actions/download-artifact@v5
+        with:
+          name: GemsNY-Exception-API-Recovery
+          path: exception_api
+          github-token: ${{ github.token }}
+          run-id: 34676685429
+
+      - name: Download 2 server-grid exception categories
+        uses: actions/download-artifact@v5
+        with:
+          pattern: GemsNY-Server-Grid-Recovery-*
+          path: server_grid
+          github-token: ${{ github.token }}
+          run-id: 34679790323
+
+      - name: Build and validate final 700-category audit
+        run: |
+          python final_gemsny_audit_merge.py \
+            --baseline baseline \
+            --diamond DIAMOND_FINAL \
+            --exception exception_api \
+            --server server_grid \
+            --output FINAL_GEMSNY_AUDIT
+
+      - name: Upload validated whole-site audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-GemsNY-Whole-Site-Image-Audit-500x500
+          path: FINAL_GEMSNY_AUDIT/
+          if-no-files-found: error
+          retention-days: 14
