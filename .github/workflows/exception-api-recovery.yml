@@ -1,0 +1,32 @@
+name: GemsNY Exception API Recovery
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'exception_api_recovery.py'
+      - '.github/workflows/exception-api-recovery.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  recover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12'
+      - name: Recover unresolved API-backed categories with no page limit
+        run: python exception_api_recovery.py --output-dir EXCEPTION_API --min-width 500 --min-height 500
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GemsNY-Exception-API-Recovery
+          path: EXCEPTION_API/
+          if-no-files-found: warn
+          retention-days: 3
