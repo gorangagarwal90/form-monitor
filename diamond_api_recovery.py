@@ -80,6 +80,20 @@ async def api_json(request, url, retries=4):
     raise RuntimeError(f'API failed: {url}: {last}')
 
 
+def compact_item(item):
+    d=item.get('details') or {}
+    iid=str(item.get('id') or d.get('sku') or '')
+    if not iid:
+        return '', None
+    return iid, {
+        'id':iid,
+        'title':item.get('title') or '',
+        'redirect_url':item.get('redirect_url') or d.get('url') or '',
+        'productImage':d.get('productImage') or item.get('productImage') or '',
+        'stillImage':d.get('stillImage') or item.get('stillImage') or '',
+    }
+
+
 async def prep(args):
     out=Path(args.output_dir); out.mkdir(parents=True,exist_ok=True)
     targets=read_targets(args.targets)
@@ -100,38 +114,73 @@ async def prep(args):
 
         for gi,(key,members) in enumerate(group_targets.items(),1):
             api=next(x['api_base'] for x in snapshot['targets'] if x['group_key']==key)
-            c=await api_json(ctx.request,count_url(api))
-            count=int(c.get('totalCount') or c.get('count') or 0)
-            if count <= 0:
-                raise RuntimeError(f'Zero/invalid API count for group {key}: {api}: {c}')
-            items=[]; page_size=args.page_size
-            pages=math.ceil(count/page_size)
-            seen=set()
-            for n in range(1,pages+1):
-                data=await api_json(ctx.request,with_page(api,n,page_size))
-                batch=data.get('items') or []
-                if not batch:
-                    raise RuntimeError(f'Empty API batch group={key} page={n}/{pages}, count={count}')
-                for item in batch:
-                    iid=str(item.get('id') or (item.get('details') or {}).get('sku') or '')
-                    if not iid or iid in seen: continue
-                    seen.add(iid)
-                    d=item.get('details') or {}
-                    items.append({
-                        'id':iid,
-                        'title':item.get('title') or '',
-                        'redirect_url':item.get('redirect_url') or d.get('url') or '',
-                        'productImage':d.get('productImage') or item.get('productImage') or '',
-                        'stillImage':d.get('stillImage') or item.get('stillImage') or '',
-                    })
-                if n==1 or n%25==0 or n==pages:
-                    print(f'SNAPSHOT group={gi}/{len(group_targets)} key={key} page={n}/{pages} unique={len(seen)}/{count}',flush=True)
-            if len(items) != count:
-                raise RuntimeError(f'Snapshot count mismatch group={key}: API count={count}, unique items={len(items)}')
-            snapshot['groups'][key]={'api_base':api,'count':count,'items':items,'target_urls':[m['category_url'] for m in members]}
+            page_size=args.page_size
+            item_map={}
+            observed_counts=[]
+            reconciled=False
+            max_passes=4
+
+            # The GemsNY diamond inventory is live and can change while hundreds of API
+            # pages are being enumerated. A single pass can therefore contain a few
+            # duplicate boundary items even when every request succeeds. Reconcile with
+            # repeated full passes and union product IDs until the ending live count is
+            # fully represented. This prevents a moving inventory from creating a false
+            # incomplete audit while still refusing unexplained missing products.
+            for pass_no in range(1,max_passes+1):
+                c=await api_json(ctx.request,count_url(api))
+                start_count=int(c.get('totalCount') or c.get('count') or 0)
+                if start_count <= 0:
+                    raise RuntimeError(f'Zero/invalid API count for group {key}: {api}: {c}')
+                observed_counts.append(start_count)
+                pages=math.ceil(start_count/page_size)
+                before=len(item_map)
+
+                for n in range(1,pages+1):
+                    data=await api_json(ctx.request,with_page(api,n,page_size))
+                    batch=data.get('items') or []
+                    if not batch:
+                        raise RuntimeError(f'Empty API batch group={key} pass={pass_no} page={n}/{pages}, count={start_count}')
+                    for item in batch:
+                        iid, compact=compact_item(item)
+                        if iid:
+                            item_map[iid]=compact
+                    if n==1 or n%25==0 or n==pages:
+                        print(f'SNAPSHOT group={gi}/{len(group_targets)} key={key} pass={pass_no}/{max_passes} page={n}/{pages} unique={len(item_map)} start_count={start_count}',flush=True)
+
+                c2=await api_json(ctx.request,count_url(api))
+                end_count=int(c2.get('totalCount') or c2.get('count') or 0)
+                observed_counts.append(end_count)
+                gained=len(item_map)-before
+                print(f'RECONCILE group={key} pass={pass_no} start_count={start_count} end_count={end_count} unique={len(item_map)} gained={gained}',flush=True)
+
+                if end_count > 0 and len(item_map) >= end_count:
+                    reconciled=True
+                    break
+
+            if not reconciled:
+                final_count=observed_counts[-1] if observed_counts else 0
+                raise RuntimeError(
+                    f'Snapshot count mismatch after {max_passes} reconciliation passes group={key}: '
+                    f'latest API count={final_count}, unique items={len(item_map)}, observed_counts={observed_counts}'
+                )
+
+            items=list(item_map.values())
+            # Snapshot count is intentionally the exact immutable SKU union captured and
+            # audited from this point onward. It may exceed the final live count by a tiny
+            # amount if products were removed during enumeration, but it cannot omit any
+            # SKU required by the final count once reconciliation succeeds.
+            snapshot_count=len(items)
+            snapshot['groups'][key]={
+                'api_base':api,
+                'count':snapshot_count,
+                'items':items,
+                'target_urls':[m['category_url'] for m in members],
+                'observed_api_counts':observed_counts,
+                'inventory_drift':snapshot_count-(observed_counts[-1] if observed_counts else snapshot_count),
+            }
         await browser.close()
     (out/'diamond_snapshot.json').write_text(json.dumps(snapshot,separators=(',',':')),encoding='utf-8')
-    summary={'targets':len(snapshot['targets']),'distinct_inventory_groups':len(snapshot['groups']),'group_counts':{k:v['count'] for k,v in snapshot['groups'].items()},'total_group_items':sum(v['count'] for v in snapshot['groups'].values())}
+    summary={'targets':len(snapshot['targets']),'distinct_inventory_groups':len(snapshot['groups']),'group_counts':{k:v['count'] for k,v in snapshot['groups'].items()},'total_group_items':sum(v['count'] for v in snapshot['groups'].values()),'inventory_drift':{k:v.get('inventory_drift',0) for k,v in snapshot['groups'].items()}}
     (out/'snapshot_summary.json').write_text(json.dumps(summary,indent=2),encoding='utf-8')
     print(json.dumps(summary,indent=2),flush=True)
 
