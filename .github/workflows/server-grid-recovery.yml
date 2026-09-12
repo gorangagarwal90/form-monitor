@@ -1,0 +1,39 @@
+name: GemsNY Server Grid Recovery
+
+on:
+  push:
+    paths:
+      - '.github/workflows/server-grid-recovery.yml'
+      - 'server-grid-recovery.flag'
+  workflow_dispatch:
+
+jobs:
+  recover:
+    strategy:
+      fail-fast: false
+      matrix:
+        target: [0, 1]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install recovery dependencies
+        run: |
+          pip install 'playwright>=1.45,<2' 'requests>=2.31,<3' 'Pillow>=10,<12'
+          python -m playwright install --with-deps chromium
+      - name: Strict forced-page recovery
+        run: |
+          python server_grid_recovery.py \
+            --target-index ${{ matrix.target }} \
+            --output-dir SERVER_GRID_${{ matrix.target }} \
+            --min-width 500 --min-height 500
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: GemsNY-Server-Grid-Recovery-${{ matrix.target }}
+          path: SERVER_GRID_${{ matrix.target }}/
+          retention-days: 3
+          if-no-files-found: warn
