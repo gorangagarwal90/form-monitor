@@ -47,3 +47,5 @@ jobs:
           name: DIAMOND-API-RECOVERY-FINAL
           path: diamond_final/
           retention-days: 7
+
+# recovery-trigger: 2026-09-12
