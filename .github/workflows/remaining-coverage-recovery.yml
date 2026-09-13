@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/remaining-coverage-recovery.yml'
-      - 'remaining_coverage_recovery_v2.py'
+      - 'remaining_coverage_recovery_v3.py'
       - 'remaining-coverage-recovery.flag'
   workflow_dispatch:
 
@@ -85,7 +85,7 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Strict remaining-category recovery
         run: |
-          python remaining_coverage_recovery_v2.py \
+          python remaining_coverage_recovery_v3.py \
             --baseline-coverage recovery_input/baseline/coverage.csv \
             --diamond-snapshot recovery_input/diamond/diamond_snapshot.json \
             --exception-root recovery_input/exception \
