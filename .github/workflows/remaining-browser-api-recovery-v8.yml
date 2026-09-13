@@ -13,6 +13,10 @@ permissions:
   contents: read
   actions: read
 
+concurrency:
+  group: gemsny-full-image-audit-v8
+  cancel-in-progress: true
+
 jobs:
   recover:
     strategy:
