@@ -44,52 +44,88 @@ def infer(row):
         if g in s: gem=g;break
     return fam,gem
 
+def add_unique(out,ep,p):
+    sig=(ep,json.dumps(p,sort_keys=True))
+    if sig not in {(x[0],json.dumps(x[1],sort_keys=True)) for x in out}: out.append((ep,p))
+
 def probes(row):
-    fam,gem=infer(row); name=row.get('category_name',''); out=[]
-    def add(ep,p): out.append((ep,p))
-    common={'client_id':CLIENT,'page':1,'page_size':5,'pageSize':5}
+    fam,gem=infer(row); out=[]
+    # Probe minimal contracts first. The prior version mixed many guessed fields in every
+    # request, which made whitelist-validation errors impossible to interpret.
     if fam=='loose':
         for ep in ('/gemstone','/gemstone/v2','/v2/gemstone','/v3/gemstone','/gemstones','/search/gemstone','/gemstone/search'):
+            bases=[{}, {'client_id':CLIENT}, {'page':1}, {'pageSize':5}, {'page':1,'pageSize':5}, {'client_id':CLIENT,'page':1,'pageSize':5}]
+            for p in bases:add_unique(out,ep,p)
             for key in ('gem_type','gemType','stone_type','stoneType','category','type'):
-                p=dict(common);p.update({key:gem,'shape':'','color':'','origin':'','treatment':'','price':'','carat':'','sort_by':'featured','sortBy':'featured'})
-                add(ep,p)
+                for val in (gem, gem.title() if gem else ''):
+                    if val:
+                        add_unique(out,ep,{key:val})
+                        add_unique(out,ep,{'page':1,'pageSize':5,key:val})
+                        add_unique(out,ep,{'client_id':CLIENT,'page':1,'pageSize':5,key:val})
     elif fam=='ring':
-        for typ in ('Preset Ring','Myo Ring','Ring',''):
-            for skey in ('stoneType','gemType','gem_type'):
-                p={'type':typ,'style':'','metal':'','centerStoneShape':'','price':'','width':'','sideStoneShape':'','centerStoneSetting':'','sideStoneSetting':'','collection':'','sortBy':'featured','page':1,'pageSize':5,skey:gem.title() if gem else ''}
-                add('/ring/v2',p)
+        for base in ({},{'page':1,'pageSize':5},{'type':'Preset Ring'},{'type':'Preset Ring','page':1,'pageSize':5}):
+            add_unique(out,'/ring/v2',base)
+        for skey in ('stoneType','gemType','gem_type'):
+            for val in (gem,gem.title() if gem else ''):
+                if val:
+                    add_unique(out,'/ring/v2',{'type':'Preset Ring',skey:val})
+                    add_unique(out,'/ring/v2',{'type':'Preset Ring',skey:val,'page':1,'pageSize':5})
     elif fam=='earring':
         for ep in ('/v3/preset-earring','/v3/preset-earrings','/preset-earring'):
-            p=dict(common);p.update({'type':'Preset Earring','gem_type':gem,'shape':'','style':'','metal':'','price':'','gemstone_quality_grade':'','diamond_quality_grade':'','carat':'','ready_to_ship':'false','sort_by':'featured'})
-            add(ep,p)
+            for base in ({},{'client_id':CLIENT},{'page':1,'pageSize':5},{'client_id':CLIENT,'page':1,'pageSize':5},{'type':'Preset Earring'}):add_unique(out,ep,base)
+            for key in ('gem_type','gemType','stoneType'):
+                if gem:
+                    add_unique(out,ep,{key:gem})
+                    add_unique(out,ep,{'client_id':CLIENT,'page':1,'pageSize':5,key:gem})
     elif fam=='pendant':
         for ep in ('/v3/preset-pendant','/preset-pendant'):
-            p=dict(common);p.update({'type':'Preset Pendant','gem_type':gem,'shape':'','style':'','metal':'','price':'','gemstone_quality_grade':'','diamond_quality_grade':'','carat':'','ready_to_ship':'false','sort_by':'featured'})
-            add(ep,p)
+            for base in ({},{'client_id':CLIENT},{'page':1,'pageSize':5},{'client_id':CLIENT,'page':1,'pageSize':5},{'type':'Preset Pendant'}):add_unique(out,ep,base)
+            for key in ('gem_type','gemType','stoneType'):
+                if gem:
+                    add_unique(out,ep,{key:gem})
+                    add_unique(out,ep,{'client_id':CLIENT,'page':1,'pageSize':5,key:gem})
     elif fam=='bracelet':
         for ep in ('/v3/preset-bracelet','/preset-bracelet'):
-            p=dict(common);p.update({'gem_type':gem,'color':'','category':'','metal':'','shape':'','price':'','sortBy':'featured','sortByShipping':''})
-            add(ep,p)
+            for base in ({},{'client_id':CLIENT},{'page':1,'pageSize':5},{'client_id':CLIENT,'page':1,'pageSize':5}):add_unique(out,ep,base)
+            for key in ('gem_type','gemType','stoneType'):
+                if gem:
+                    add_unique(out,ep,{key:gem})
+                    add_unique(out,ep,{'client_id':CLIENT,'page':1,'pageSize':5,key:gem})
     elif fam=='band':
         for ep in ('/v3/preset-band','/preset-band'):
-            p=dict(common);p.update({'stone_type':gem.title() if gem else '','shape':'','category':'','metal':'','total_weight':'','price':'','band_width':'','setting_type':'','band_type':'','sort_by':'featured'})
-            add(ep,p)
+            for base in ({},{'client_id':CLIENT},{'page':1,'pageSize':5},{'client_id':CLIENT,'page':1,'pageSize':5}):add_unique(out,ep,base)
+            for key in ('stone_type','stoneType','gem_type','gemType'):
+                if gem:
+                    add_unique(out,ep,{key:gem.title()})
+                    add_unique(out,ep,{'client_id':CLIENT,'page':1,'pageSize':5,key:gem.title()})
     return out
+
+def cnt(r):
+    try:return int(float((r.get('expected_products_if_detected') or '0').replace(',','')))
+    except:return 0
+
+def pick_representatives(targets):
+    # Guarantee family coverage first, then add up to three high-count examples per family.
+    byfam={}
+    for r in targets:
+        fam,_=infer(r); byfam.setdefault(fam,[]).append(r)
+    picked=[]; seen=set()
+    for fam,rows in sorted(byfam.items()):
+        rows=sorted(rows,key=cnt,reverse=True)
+        for r in rows[:3]:
+            u=r['category_url']
+            if u not in seen: picked.append(r);seen.add(u)
+    # Add a few overall high-count cases without allowing one family to crowd out others.
+    for r in sorted(targets,key=cnt,reverse=True):
+        if len(picked)>=30:break
+        if r['category_url'] not in seen: picked.append(r);seen.add(r['category_url'])
+    return picked[:30]
 
 def main():
     ap=argparse.ArgumentParser();ap.add_argument('--baseline-coverage',required=True);ap.add_argument('--exclude-root',action='append',default=[]);ap.add_argument('--output',required=True);a=ap.parse_args()
     base=read_csv(a.baseline_coverage); exc=exclusions(a.exclude_root)
     targets=[r for r in base if r.get('category_url') and r.get('status')!='COMPLETE' and r['category_url'] not in exc]
-    # representative categories per family + any high-count target
-    picked=[]; seenfam=set()
-    def cnt(r):
-        try:return int(float((r.get('expected_products_if_detected') or '0').replace(',','')))
-        except:return 0
-    for r in sorted(targets,key=cnt,reverse=True):
-        fam,_=infer(r)
-        if fam not in seenfam or cnt(r)>=1000:
-            picked.append(r); seenfam.add(fam)
-        if len(picked)>=20: break
+    picked=pick_representatives(targets)
     sess=requests.Session();sess.headers.update({'User-Agent':UA,'Accept':'application/json,text/plain,*/*','Origin':'https://www.gemsny.com','Referer':'https://www.gemsny.com/'})
     results=[]
     for r in picked:
@@ -97,16 +133,19 @@ def main():
         for ep,p in probes(r):
             try:
                 resp=sess.get(BASE+ep,params=p,timeout=30)
-                body=resp.text[:1200]
-                rec={'category_name':r.get('category_name'),'category_url':r['category_url'],'family':fam,'gem':gem,'expected':cnt(r),'endpoint':ep,'status':resp.status_code,'request_url':resp.url,'body':body}
+                body=resp.text[:2200]
+                rec={'category_name':r.get('category_name'),'category_url':r['category_url'],'family':fam,'gem':gem,'expected':cnt(r),'endpoint':ep,'status':resp.status_code,'request_url':resp.url,'params':p,'body':body}
                 if resp.status_code==200:
                     try:
-                        obj=resp.json(); rec['json_keys']=list(obj)[:30] if isinstance(obj,dict) else ['<list>']; rec['json_sample']=json.dumps(obj,ensure_ascii=False)[:3000]
-                    except Exception: pass
+                        obj=resp.json(); rec['json_keys']=list(obj)[:40] if isinstance(obj,dict) else ['<list>']; rec['json_sample']=json.dumps(obj,ensure_ascii=False)[:5000]
+                    except Exception as e:rec['json_error']=repr(e)
                 results.append(rec)
                 print(json.dumps(rec,ensure_ascii=False),flush=True)
             except Exception as e:
-                results.append({'category_name':r.get('category_name'),'category_url':r['category_url'],'family':fam,'gem':gem,'expected':cnt(r),'endpoint':ep,'status':'EXCEPTION','body':repr(e)})
-    Path(a.output).write_text(json.dumps({'targets_total':len(targets),'sampled':len(picked),'results':results},indent=2,ensure_ascii=False),encoding='utf-8')
+                results.append({'category_name':r.get('category_name'),'category_url':r['category_url'],'family':fam,'gem':gem,'expected':cnt(r),'endpoint':ep,'status':'EXCEPTION','params':p,'body':repr(e)})
+    summary={}
+    for r in picked:
+        fam,_=infer(r);summary[fam]=summary.get(fam,0)+1
+    Path(a.output).write_text(json.dumps({'targets_total':len(targets),'sampled':len(picked),'sampled_by_family':summary,'results':results},indent=2,ensure_ascii=False),encoding='utf-8')
 
 if __name__=='__main__': main()
