@@ -74,7 +74,7 @@ jobs:
     needs: prepare
     strategy:
       fail-fast: false
-      max-parallel: 16
+      max-parallel: 12
       matrix:
         shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]
     runs-on: ubuntu-latest
@@ -89,8 +89,10 @@ jobs:
           name: GemsNY-Remaining-Recovery-Input
           path: recovery_input
       - name: Install recovery dependencies
-        run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12' 'beautifulsoup4>=4.12,<5'
-      - name: Strict SSR HTML remaining-category recovery
+        run: |
+          pip install 'playwright>=1.45,<2' 'requests>=2.31,<3' 'Pillow>=10,<12' 'beautifulsoup4>=4.12,<5'
+          python -m playwright install --with-deps chromium
+      - name: Strict browser-rendered remaining-category recovery
         run: |
           python remaining_html_recovery_v5.py \
             --baseline-coverage recovery_input/baseline/coverage.csv \
