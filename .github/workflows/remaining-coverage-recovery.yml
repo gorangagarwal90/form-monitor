@@ -5,7 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/remaining-coverage-recovery.yml'
-      - 'remaining_api_recovery_v4.py'
+      - 'remaining_html_recovery_v5.py'
       - 'remaining-coverage-recovery.flag'
   workflow_dispatch:
 
@@ -89,21 +89,21 @@ jobs:
           name: GemsNY-Remaining-Recovery-Input
           path: recovery_input
       - name: Install recovery dependencies
-        run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12'
-      - name: Strict API-backed remaining-category recovery
+        run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12' 'beautifulsoup4>=4.12,<5'
+      - name: Strict SSR HTML remaining-category recovery
         run: |
-          python remaining_api_recovery_v4.py \
+          python remaining_html_recovery_v5.py \
             --baseline-coverage recovery_input/baseline/coverage.csv \
             --exclude-root recovery_input/exception \
             --exclude-root recovery_input/server \
             --exclude-root recovery_input/prior_remaining \
-            --output-dir REMAINING_API_${{ matrix.shard }} \
+            --output-dir REMAINING_HTML_${{ matrix.shard }} \
             --shard-index ${{ matrix.shard }} --shard-count 64 \
             --min-width 500 --min-height 500
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: GemsNY-Remaining-API-Recovery-${{ matrix.shard }}
-          path: REMAINING_API_${{ matrix.shard }}/
+          name: GemsNY-Remaining-HTML-Recovery-${{ matrix.shard }}
+          path: REMAINING_HTML_${{ matrix.shard }}/
           retention-days: 3
           if-no-files-found: warn
