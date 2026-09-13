@@ -1,0 +1,76 @@
+name: GemsNY Remaining API Probe V5
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/remaining-api-probe-v5.yml'
+      - 'remaining_api_probe_v5.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Download recovered 700-category baseline
+        uses: actions/download-artifact@v5
+        with:
+          name: FINAL-GemsNY-Image-Audit-RECOVERED
+          path: input/baseline
+          github-token: ${{ github.token }}
+          run-id: 34626456374
+      - name: Download API exception recovery
+        uses: actions/download-artifact@v5
+        with:
+          name: GemsNY-Exception-API-Recovery
+          path: input/exception
+          github-token: ${{ github.token }}
+          run-id: 34676685429
+      - name: Download server-grid recovery
+        uses: actions/download-artifact@v5
+        with:
+          pattern: GemsNY-Server-Grid-Recovery-*
+          path: input/server
+          github-token: ${{ github.token }}
+          run-id: 34679790323
+      - name: Download valid prior partial coverage
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-Recovery-*
+          path: input/prior_remaining
+          github-token: ${{ github.token }}
+          run-id: 34731683227
+      - name: Download valid latest partial coverage
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-HTML-Recovery-*
+          path: input/prior_latest
+          github-token: ${{ github.token }}
+          run-id: 34760058781
+      - run: pip install 'requests>=2.31,<3'
+      - name: Probe unresolved backend endpoint contracts
+        run: |
+          python remaining_api_probe_v5.py \
+            --baseline-coverage input/baseline/coverage.csv \
+            --exclude-root input/exception \
+            --exclude-root input/server \
+            --exclude-root input/prior_remaining \
+            --exclude-root input/prior_latest \
+            --output remaining_api_probe_v5.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GemsNY-Remaining-API-Probe-V5
+          path: remaining_api_probe_v5.json
+          retention-days: 3
+          if-no-files-found: error
