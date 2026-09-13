@@ -55,14 +55,23 @@ jobs:
           path: input/prior_remaining
           github-token: ${{ github.token }}
           run-id: 34731683227
+      - name: Download valid partial results from latest browser recovery
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-HTML-Recovery-*
+          path: input/prior_latest
+          github-token: ${{ github.token }}
+          run-id: 34760058781
       - name: Keep compact recovery inputs
         run: |
-          mkdir -p compact/baseline compact/diamond compact/exception compact/server compact/prior_remaining
+          mkdir -p compact/baseline compact/diamond compact/exception compact/server compact/prior_remaining compact/prior_latest
           cp input/baseline/coverage.csv compact/baseline/coverage.csv
           cp input/diamond/diamond_snapshot.json compact/diamond/diamond_snapshot.json
           find input/exception -name coverage.csv -exec cp {} compact/exception/coverage.csv \;
           i=0; while IFS= read -r f; do cp "$f" "compact/server/coverage-$i.csv"; i=$((i+1)); done < <(find input/server -name coverage.csv | sort)
           i=0; while IFS= read -r f; do cp "$f" "compact/prior_remaining/coverage-$i.csv"; i=$((i+1)); done < <(find input/prior_remaining -name coverage.csv | sort)
+          i=0; while IFS= read -r f; do cp "$f" "compact/prior_latest/coverage-$i.csv"; i=$((i+1)); done < <(find input/prior_latest -name coverage.csv | sort)
       - uses: actions/upload-artifact@v4
         with:
           name: GemsNY-Remaining-Recovery-Input
@@ -74,7 +83,7 @@ jobs:
     needs: prepare
     strategy:
       fail-fast: false
-      max-parallel: 12
+      max-parallel: 2
       matrix:
         shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]
     runs-on: ubuntu-latest
@@ -99,6 +108,7 @@ jobs:
             --exclude-root recovery_input/exception \
             --exclude-root recovery_input/server \
             --exclude-root recovery_input/prior_remaining \
+            --exclude-root recovery_input/prior_latest \
             --output-dir REMAINING_HTML_${{ matrix.shard }} \
             --shard-index ${{ matrix.shard }} --shard-count 64 \
             --min-width 500 --min-height 500
