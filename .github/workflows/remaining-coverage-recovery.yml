@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/remaining-coverage-recovery.yml'
+      - 'remaining_coverage_recovery_v2.py'
       - 'remaining-coverage-recovery.flag'
   workflow_dispatch:
 
@@ -66,9 +67,9 @@ jobs:
       fail-fast: false
       max-parallel: 16
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]
     runs-on: ubuntu-24.04
-    timeout-minutes: 350
+    timeout-minutes: 240
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -84,13 +85,13 @@ jobs:
           python -m playwright install --with-deps chromium
       - name: Strict remaining-category recovery
         run: |
-          python remaining_coverage_recovery.py \
+          python remaining_coverage_recovery_v2.py \
             --baseline-coverage recovery_input/baseline/coverage.csv \
             --diamond-snapshot recovery_input/diamond/diamond_snapshot.json \
             --exception-root recovery_input/exception \
             --server-root recovery_input/server \
             --output-dir REMAINING_${{ matrix.shard }} \
-            --shard-index ${{ matrix.shard }} --shard-count 32 \
+            --shard-index ${{ matrix.shard }} --shard-count 64 \
             --min-width 500 --min-height 500
       - uses: actions/upload-artifact@v4
         if: always()
