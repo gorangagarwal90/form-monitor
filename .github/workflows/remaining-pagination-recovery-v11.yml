@@ -1,12 +1,12 @@
-name: GemsNY Remaining Adaptive Pagination Recovery V20
+name: GemsNY Remaining Robust Contract Recovery V21
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/remaining-pagination-recovery-v11.yml'
+      - 'remaining_catalog_recovery_v21.py'
       - 'remaining_catalog_recovery_v20.py'
-      - 'remaining_catalog_recovery_v19.py'
       - 'remaining_catalog_recovery_v18.py'
       - 'remaining_catalog_recovery_v17.py'
       - 'final_strict_merge_v9.py'
@@ -17,7 +17,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: gemsny-full-image-audit-v20
+  group: gemsny-full-image-audit-v21
   cancel-in-progress: true
 
 jobs:
@@ -151,12 +151,20 @@ jobs:
           path: input/v19prior
           github-token: ${{ github.token }}
           run-id: 34881420476
+      - name: Preserve valid V20 completions
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-Adaptive-V20-*
+          path: input/v20prior
+          github-token: ${{ github.token }}
+          run-id: 34887910110
       - name: Validate baseline
         run: test -s input/baseline/coverage.csv
       - name: Upload reusable inputs
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-V20-Recovery-Inputs
+          name: GemsNY-V21-Recovery-Inputs
           path: input/
           retention-days: 5
           if-no-files-found: error
@@ -178,14 +186,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V20-Recovery-Inputs
+          name: GemsNY-V21-Recovery-Inputs
           path: input
       - run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12'
-      - name: Recover unresolved categories with paired pagination discovery
+      - name: Recover unresolved categories with robust contract discovery
         id: audit
         continue-on-error: true
         run: |
-          python remaining_catalog_recovery_v20.py \
+          python remaining_catalog_recovery_v21.py \
             --baseline-coverage input/baseline/coverage.csv \
             --exclude-root input/exception \
             --exclude-root input/server \
@@ -202,6 +210,7 @@ jobs:
             --exclude-root input/v17prior \
             --exclude-root input/v18prior \
             --exclude-root input/v19prior \
+            --exclude-root input/v20prior \
             --output-dir output \
             --shard-index ${{ matrix.shard }} \
             --shard-count 96 \
@@ -211,7 +220,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-Remaining-Adaptive-V20-${{ matrix.shard }}
+          name: GemsNY-Remaining-Robust-V21-${{ matrix.shard }}
           path: output/
           retention-days: 5
           if-no-files-found: error
@@ -232,14 +241,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V20-Recovery-Inputs
+          name: GemsNY-V21-Recovery-Inputs
           path: input
-      - name: Download V20 shard evidence
+      - name: Download V21 shard evidence
         uses: actions/download-artifact@v5
         continue-on-error: true
         with:
-          pattern: GemsNY-Remaining-Adaptive-V20-*
-          path: input/v20
+          pattern: GemsNY-Remaining-Robust-V21-*
+          path: input/v21
       - run: pip install 'XlsxWriter>=3.2,<4'
       - name: Strict whole-site merge and validation
         id: strictmerge
@@ -262,13 +271,14 @@ jobs:
             --recovery-root input/v17prior \
             --recovery-root input/v18prior \
             --recovery-root input/v19prior \
-            --recovery-root input/v20 \
+            --recovery-root input/v20prior \
+            --recovery-root input/v21 \
             --output final
       - name: Upload final report or strict failure manifest
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FINAL-GemsNY-Full-Image-Audit-500x500-V20
+          name: FINAL-GemsNY-Full-Image-Audit-500x500-V21
           path: final/
           retention-days: 14
           if-no-files-found: error
