@@ -1,10 +1,12 @@
-name: GemsNY Remaining Catalog Recovery V14
+name: GemsNY Remaining Catalog Recovery V15
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/remaining-pagination-recovery-v11.yml'
+      - 'remaining_catalog_recovery_v15.py'
+      - 'remaining_api_recovery_v4.py'
       - 'remaining_catalog_recovery_v14.py'
   workflow_dispatch:
 
@@ -13,7 +15,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: gemsny-full-image-audit-v14
+  group: gemsny-full-image-audit-v15
   cancel-in-progress: true
 
 jobs:
@@ -99,12 +101,20 @@ jobs:
           path: input/v13prior
           github-token: ${{ github.token }}
           run-id: 34840163959
+      - name: Preserve valid V14 completions
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-Catalog-V14-*
+          path: input/v14prior
+          github-token: ${{ github.token }}
+          run-id: 34844495080
       - name: Validate baseline
         run: test -s input/baseline/coverage.csv
       - name: Upload reusable inputs
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-V14-Recovery-Inputs
+          name: GemsNY-V15-Recovery-Inputs
           path: input/
           retention-days: 5
           if-no-files-found: error
@@ -113,9 +123,9 @@ jobs:
     needs: prepare
     strategy:
       fail-fast: false
-      max-parallel: 6
+      max-parallel: 8
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23]
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -126,14 +136,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V14-Recovery-Inputs
+          name: GemsNY-V15-Recovery-Inputs
           path: input
       - run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12'
-      - name: Recover unresolved categories from complete backend family catalogs
+      - name: Recover unresolved categories through strict per-category backend APIs
         id: audit
         continue-on-error: true
         run: |
-          python remaining_catalog_recovery_v14.py \
+          python remaining_catalog_recovery_v15.py \
             --baseline-coverage input/baseline/coverage.csv \
             --exclude-root input/exception \
             --exclude-root input/server \
@@ -144,16 +154,17 @@ jobs:
             --exclude-root input/v11prior \
             --exclude-root input/v12prior \
             --exclude-root input/v13prior \
+            --exclude-root input/v14prior \
             --output-dir output \
             --shard-index ${{ matrix.shard }} \
-            --shard-count 24 \
+            --shard-count 48 \
             --min-width 500 \
             --min-height 500
       - name: Upload shard evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-Remaining-Catalog-V14-${{ matrix.shard }}
+          name: GemsNY-Remaining-Catalog-V15-${{ matrix.shard }}
           path: output/
           retention-days: 5
           if-no-files-found: error
@@ -174,14 +185,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V14-Recovery-Inputs
+          name: GemsNY-V15-Recovery-Inputs
           path: input
-      - name: Download V14 shard evidence
+      - name: Download V15 shard evidence
         uses: actions/download-artifact@v5
         continue-on-error: true
         with:
-          pattern: GemsNY-Remaining-Catalog-V14-*
-          path: input/v14
+          pattern: GemsNY-Remaining-Catalog-V15-*
+          path: input/v15
       - run: pip install 'XlsxWriter>=3.2,<4'
       - name: Strict whole-site merge and validation
         id: strictmerge
@@ -198,13 +209,14 @@ jobs:
             --recovery-root input/v11prior \
             --recovery-root input/v12prior \
             --recovery-root input/v13prior \
-            --recovery-root input/v14 \
+            --recovery-root input/v14prior \
+            --recovery-root input/v15 \
             --output final
       - name: Upload final report or strict failure manifest
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FINAL-GemsNY-Full-Image-Audit-500x500-V14
+          name: FINAL-GemsNY-Full-Image-Audit-500x500-V15
           path: final/
           retention-days: 14
           if-no-files-found: error
