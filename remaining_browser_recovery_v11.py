@@ -2,6 +2,10 @@ import math,time,re
 from urllib.parse import urlparse
 import remaining_browser_recovery_v9 as core
 
+# Preserve the original V9 browser enumerator before monkey-patching core below.
+# Without this alias, enumerate_browser() recursively calls itself after assignment.
+ORIGINAL_ENUMERATE_BROWSER = core.enumerate_browser
+
 # V11 keeps the strict V9 counting/image rules, but actively exercises the live
 # pagination UI so APIs that are only called after page 1 become observable.
 
@@ -61,14 +65,12 @@ def _click_pagination_once(page):
         return False
     try:
         el.scroll_into_view_if_needed(timeout=3000)
-        before=page.url
         el.click(timeout=7000)
         try:
             page.wait_for_load_state('domcontentloaded',timeout=15000)
         except Exception:
             pass
         page.wait_for_timeout(3500)
-        # Some grids append items only after a further scroll.
         try: page.evaluate('window.scrollTo(0,document.body.scrollHeight)')
         except Exception: pass
         page.wait_for_timeout(1200)
@@ -87,9 +89,6 @@ def capture_candidates(page,url):
             try: page.evaluate(f'window.scrollTo(0,document.body.scrollHeight*{(i+1)/6})')
             except Exception: pass
             page.wait_for_timeout(500)
-        # Critical V11 addition: exercise the site's real pagination once while
-        # the response listener is active. This exposes page/offset POST bodies
-        # and query parameters that do not exist on initial render.
         _click_pagination_once(page)
         page.wait_for_timeout(1000)
     except Exception:
@@ -113,7 +112,7 @@ def _next_control(page):
 
 def enumerate_browser(page,url,expected):
     # First keep the proven query-parameter path from V9.
-    qseen,qpages,qerr=core.enumerate_browser(page,url,expected)
+    qseen,qpages,qerr=ORIGINAL_ENUMERATE_BROWSER(page,url,expected)
     if len(qseen)==expected:
         return qseen,qpages,qerr
 
@@ -126,14 +125,12 @@ def enumerate_browser(page,url,expected):
     if not seen:
         return qseen if len(qseen)>0 else seen,1,f'click DOM product count 0/{expected}; prior={qerr}'
     pages=1;stagnant=0
-    # Bound by exact expected count, not an arbitrary category/page ceiling.
-    # The +20 only permits sparse/repeated UI transitions; it does not truncate coverage.
     est=max(1,len(seen));max_steps=max(20,math.ceil(expected/est)+20)
     for _ in range(max_steps):
         ctl=_next_control(page)
         if not ctl:
             break
-        before=len(seen);before_sig=tuple(list(seen)[:12])
+        before=len(seen)
         try:
             ctl.scroll_into_view_if_needed(timeout=3000)
             ctl.click(timeout=7000)
