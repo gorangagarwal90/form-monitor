@@ -1,4 +1,5 @@
 import math,re,json
+from html import unescape
 from urllib.parse import urljoin
 import remaining_browser_recovery_v9 as core
 
@@ -6,9 +7,54 @@ import remaining_browser_recovery_v9 as core
 ORIGINAL_ENUMERATE_BROWSER = core.enumerate_browser
 ORIGINAL_DOM_PRODUCTS = core.dom_products
 
-# V11.1: keep strict V9 exact-count/source-image rules, but broaden discovery for
+# V11.2: keep strict V9 exact-count/source-image rules, but broaden discovery for
 # Next/RSC pages and newer card markup. Nothing is accepted unless the final
 # unique product count still equals the expected category inventory.
+
+def _decode_raw(txt):
+    if not txt:
+        return ''
+    s=unescape(str(txt))
+    # Next/RSC payloads commonly JSON-escape slash/quote/unicode sequences.
+    for _ in range(3):
+        old=s
+        s=s.replace('\\/','/').replace('\\"','"').replace('\\u0026','&').replace('\\u003d','=').replace('\\u003f','?').replace('\\u002f','/').replace('\\u003a',':')
+        if s==old:
+            break
+    return s
+
+def _raw_products(txt,base_url='https://www.gemsny.com/'):
+    """Recover product identities directly from escaped Next/RSC/HTML image paths.
+
+    GemsNY source-image URLs contain /image-gemstone/<product-key>/ or
+    /image-jewelry/<product-key>/, which gives us a stable product key without
+    trusting rendered card markup. The strict caller still requires the exact
+    expected unique-product count before accepting coverage.
+    """
+    s=_decode_raw(txt)
+    out={}
+    # Absolute or protocol-relative asset URLs.
+    pats=[
+        r'(https?:\\?/\\?/(?:assets\\.)?gemsny\\.com/[^\s"\'<>]+)',
+        r'(//(?:assets\\.)?gemsny\\.com/[^\s"\'<>]+)',
+        r'((?:https?:)?//[^\s"\'<>]*?/image-(?:jewelry|gemstone)/[^\s"\'<>]+)',
+        r'(/image-(?:jewelry|gemstone)/[^\s"\'<>]+)',
+    ]
+    vals=[]
+    for pat in pats:
+        try: vals.extend(re.findall(pat,s,re.I))
+        except Exception: pass
+    for raw in vals:
+        u=_decode_raw(raw).rstrip('\\,;)]}')
+        if u.startswith('//'): u='https:'+u
+        elif u.startswith('/'): u=urljoin('https://assets.gemsny.com/',u.lstrip('/'))
+        m=re.search(r'/image-(?:jewelry|gemstone)/([^/?#"\'\\]+)',u,re.I)
+        if not m: continue
+        k=m.group(1).strip()
+        if not k or len(k)<2: continue
+        if re.search(r'logo|icon|badge|sprite|placeholder|loader',u,re.I): continue
+        out.setdefault(k,{'sku':k,'product_url':'','image':u})
+    return list(out.values())
 
 def _response_collector(caps):
     def onresp(resp):
@@ -16,20 +62,21 @@ def _response_collector(caps):
             if resp.status != 200:
                 return
             ct=(resp.headers.get('content-type') or '').lower()
-            if not any(x in ct for x in ('json','javascript','text/plain','text/x-component','event-stream')) and 'storebe.gemsny.com' not in resp.url:
+            if not any(x in ct for x in ('json','javascript','text/plain','text/x-component','event-stream','text/html')) and 'storebe.gemsny.com' not in resp.url:
                 return
-            obj=None
+            obj=None; txt=''
             try:
                 obj=resp.json()
             except Exception:
+                try: txt=resp.text()
+                except Exception: txt=''
                 try:
-                    txt=resp.text()
                     if txt and txt[:1] in '[{': obj=json.loads(txt)
                 except Exception:
                     pass
-            if obj is None:
-                return
-            items=core.best_items(obj)
+            items=core.best_items(obj) if obj is not None else []
+            if not items and txt:
+                items=_raw_products(txt,resp.url)
             if not items:
                 return
             req=resp.request
@@ -92,7 +139,7 @@ def capture_candidates(page,url):
     return out
 
 def _embedded_products(page):
-    """Extract product-ish objects/links from Next data, JSON scripts and hydrated HTML."""
+    """Extract product-ish objects/links/source-image paths from Next data/RSC/HTML."""
     out={}
     def add(d):
         if not isinstance(d,dict): return
@@ -112,14 +159,18 @@ def _embedded_products(page):
                     add(d)
         except Exception:
             pass
+        for d in _raw_products(txt,page.url):
+            add(d)
     # Last-resort hydrated HTML parser. It deliberately requires a product-like
-    # URL plus an image URL, so navigation/logo assets are not treated as products.
+    # URL plus an image URL, or a GemsNY source-image path whose directory gives
+    # us the product key.
     try:
         html=page.content()
     except Exception:
         html=''
     if html:
-        # Match links and nearby image URLs in either ordering within a bounded card chunk.
+        for d in _raw_products(html,page.url):
+            add(d)
         for m in re.finditer(r'href=["\']([^"\']+)["\']',html,re.I):
             href=m.group(1)
             if href.startswith(('#','javascript:','mailto:','tel:')): continue
@@ -159,7 +210,7 @@ def enumerate_browser(page,url,expected):
         pass
     first=dom_products(page); seen={str(x['sku']):x for x in first if x.get('sku')}
     if len(seen)==expected: return seen,1,''
-    if not seen: return qseen if len(qseen)>0 else seen,1,f'embedded/click DOM product count 0/{expected}; prior={qerr}'
+    if not seen: return qseen if len(qseen)>0 else seen,1,f'embedded/RSC DOM product count 0/{expected}; prior={qerr}'
     pages=1; stagnant=0; est=max(1,len(seen)); max_steps=max(20,math.ceil(expected/est)+20)
     for _ in range(max_steps):
         ctl=_next_control(page)
@@ -183,7 +234,7 @@ def enumerate_browser(page,url,expected):
         if stagnant>=3: break
     if len(seen)==expected: return seen,pages,''
     if len(qseen)>len(seen): return qseen,qpages,qerr
-    return seen,pages,f'embedded/click DOM product count {len(seen)}/{expected}; prior={qerr}'
+    return seen,pages,f'embedded/RSC DOM product count {len(seen)}/{expected}; prior={qerr}'
 
 core.capture_candidates=capture_candidates
 core.dom_products=dom_products
