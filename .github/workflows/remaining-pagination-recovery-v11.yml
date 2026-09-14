@@ -1,10 +1,11 @@
-name: GemsNY Remaining URL-Filtered Recovery V18
+name: GemsNY Remaining Adaptive Pagination Recovery V19
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/remaining-pagination-recovery-v11.yml'
+      - 'remaining_catalog_recovery_v19.py'
       - 'remaining_catalog_recovery_v18.py'
       - 'remaining_catalog_recovery_v17.py'
       - 'final_strict_merge_v9.py'
@@ -15,7 +16,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: gemsny-full-image-audit-v18
+  group: gemsny-full-image-audit-v19
   cancel-in-progress: true
 
 jobs:
@@ -133,12 +134,20 @@ jobs:
           path: input/v17prior
           github-token: ${{ github.token }}
           run-id: 34872810679
+      - name: Preserve valid V18 completions
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-URLFiltered-V18-*
+          path: input/v18prior
+          github-token: ${{ github.token }}
+          run-id: 34878006583
       - name: Validate baseline
         run: test -s input/baseline/coverage.csv
       - name: Upload reusable inputs
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-V18-Recovery-Inputs
+          name: GemsNY-V19-Recovery-Inputs
           path: input/
           retention-days: 5
           if-no-files-found: error
@@ -160,14 +169,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V18-Recovery-Inputs
+          name: GemsNY-V19-Recovery-Inputs
           path: input
       - run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12'
-      - name: Recover unresolved categories with robust source-image discovery
+      - name: Recover unresolved categories with adaptive pagination discovery
         id: audit
         continue-on-error: true
         run: |
-          python remaining_catalog_recovery_v18.py \
+          python remaining_catalog_recovery_v19.py \
             --baseline-coverage input/baseline/coverage.csv \
             --exclude-root input/exception \
             --exclude-root input/server \
@@ -182,6 +191,7 @@ jobs:
             --exclude-root input/v15prior \
             --exclude-root input/v16prior \
             --exclude-root input/v17prior \
+            --exclude-root input/v18prior \
             --output-dir output \
             --shard-index ${{ matrix.shard }} \
             --shard-count 64 \
@@ -191,7 +201,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-Remaining-URLFiltered-V18-${{ matrix.shard }}
+          name: GemsNY-Remaining-Adaptive-V19-${{ matrix.shard }}
           path: output/
           retention-days: 5
           if-no-files-found: error
@@ -212,14 +222,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V18-Recovery-Inputs
+          name: GemsNY-V19-Recovery-Inputs
           path: input
-      - name: Download V18 shard evidence
+      - name: Download V19 shard evidence
         uses: actions/download-artifact@v5
         continue-on-error: true
         with:
-          pattern: GemsNY-Remaining-URLFiltered-V18-*
-          path: input/v18
+          pattern: GemsNY-Remaining-Adaptive-V19-*
+          path: input/v19
       - run: pip install 'XlsxWriter>=3.2,<4'
       - name: Strict whole-site merge and validation
         id: strictmerge
@@ -240,13 +250,14 @@ jobs:
             --recovery-root input/v15prior \
             --recovery-root input/v16prior \
             --recovery-root input/v17prior \
-            --recovery-root input/v18 \
+            --recovery-root input/v18prior \
+            --recovery-root input/v19 \
             --output final
       - name: Upload final report or strict failure manifest
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FINAL-GemsNY-Full-Image-Audit-500x500-V18
+          name: FINAL-GemsNY-Full-Image-Audit-500x500-V19
           path: final/
           retention-days: 14
           if-no-files-found: error
