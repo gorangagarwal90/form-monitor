@@ -1,10 +1,11 @@
-name: GemsNY Remaining URL-Filtered Recovery V17
+name: GemsNY Remaining URL-Filtered Recovery V18
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/remaining-pagination-recovery-v11.yml'
+      - 'remaining_catalog_recovery_v18.py'
       - 'remaining_catalog_recovery_v17.py'
       - 'final_strict_merge_v9.py'
   workflow_dispatch:
@@ -14,7 +15,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: gemsny-full-image-audit-v17
+  group: gemsny-full-image-audit-v18
   cancel-in-progress: true
 
 jobs:
@@ -124,12 +125,20 @@ jobs:
           path: input/v16prior
           github-token: ${{ github.token }}
           run-id: 34860174690
+      - name: Preserve valid V17 completions
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-URLFiltered-V17-*
+          path: input/v17prior
+          github-token: ${{ github.token }}
+          run-id: 34872810679
       - name: Validate baseline
         run: test -s input/baseline/coverage.csv
       - name: Upload reusable inputs
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-V17-Recovery-Inputs
+          name: GemsNY-V18-Recovery-Inputs
           path: input/
           retention-days: 5
           if-no-files-found: error
@@ -140,7 +149,7 @@ jobs:
       fail-fast: false
       max-parallel: 8
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47]
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -151,14 +160,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V17-Recovery-Inputs
+          name: GemsNY-V18-Recovery-Inputs
           path: input
       - run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12'
-      - name: Recover unresolved categories with exact URL-derived filters
+      - name: Recover unresolved categories with robust source-image discovery
         id: audit
         continue-on-error: true
         run: |
-          python remaining_catalog_recovery_v17.py \
+          python remaining_catalog_recovery_v18.py \
             --baseline-coverage input/baseline/coverage.csv \
             --exclude-root input/exception \
             --exclude-root input/server \
@@ -172,16 +181,17 @@ jobs:
             --exclude-root input/v14prior \
             --exclude-root input/v15prior \
             --exclude-root input/v16prior \
+            --exclude-root input/v17prior \
             --output-dir output \
             --shard-index ${{ matrix.shard }} \
-            --shard-count 48 \
+            --shard-count 64 \
             --min-width 500 \
             --min-height 500
       - name: Upload shard evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-Remaining-URLFiltered-V17-${{ matrix.shard }}
+          name: GemsNY-Remaining-URLFiltered-V18-${{ matrix.shard }}
           path: output/
           retention-days: 5
           if-no-files-found: error
@@ -202,14 +212,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V17-Recovery-Inputs
+          name: GemsNY-V18-Recovery-Inputs
           path: input
-      - name: Download V17 shard evidence
+      - name: Download V18 shard evidence
         uses: actions/download-artifact@v5
         continue-on-error: true
         with:
-          pattern: GemsNY-Remaining-URLFiltered-V17-*
-          path: input/v17
+          pattern: GemsNY-Remaining-URLFiltered-V18-*
+          path: input/v18
       - run: pip install 'XlsxWriter>=3.2,<4'
       - name: Strict whole-site merge and validation
         id: strictmerge
@@ -229,13 +239,14 @@ jobs:
             --recovery-root input/v14prior \
             --recovery-root input/v15prior \
             --recovery-root input/v16prior \
-            --recovery-root input/v17 \
+            --recovery-root input/v17prior \
+            --recovery-root input/v18 \
             --output final
       - name: Upload final report or strict failure manifest
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FINAL-GemsNY-Full-Image-Audit-500x500-V17
+          name: FINAL-GemsNY-Full-Image-Audit-500x500-V18
           path: final/
           retention-days: 14
           if-no-files-found: error
