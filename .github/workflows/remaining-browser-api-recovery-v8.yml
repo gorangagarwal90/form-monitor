@@ -18,7 +18,69 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download recovered 700-category baseline once
+        uses: actions/download-artifact@v5
+        with:
+          name: FINAL-GemsNY-Image-Audit-RECOVERED
+          path: input/baseline
+          github-token: ${{ github.token }}
+          run-id: 34626456374
+      - name: Download API exception recovery once
+        uses: actions/download-artifact@v5
+        with:
+          name: GemsNY-Exception-API-Recovery
+          path: input/exception
+          github-token: ${{ github.token }}
+          run-id: 34676685429
+      - name: Download server-grid recovery once
+        uses: actions/download-artifact@v5
+        with:
+          pattern: GemsNY-Server-Grid-Recovery-*
+          path: input/server
+          github-token: ${{ github.token }}
+          run-id: 34679790323
+      - name: Download valid prior partial coverage once
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-Recovery-*
+          path: input/prior_remaining
+          github-token: ${{ github.token }}
+          run-id: 34731683227
+      - name: Download valid HTML partial coverage once
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-HTML-Recovery-*
+          path: input/prior_latest
+          github-token: ${{ github.token }}
+          run-id: 34760058781
+      - name: Download V7 exact-API partial coverage once
+        uses: actions/download-artifact@v5
+        with:
+          pattern: GemsNY-Remaining-Exact-API-V7-*
+          path: input/v7
+          github-token: ${{ github.token }}
+          run-id: 34786803872
+      - name: Validate reusable inputs exist
+        run: |
+          test -s input/baseline/coverage.csv
+          find input -type f | head
+      - name: Upload one reusable input bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: GemsNY-V8-Recovery-Inputs
+          path: input/
+          retention-days: 5
+          if-no-files-found: error
+
   recover:
+    needs: prepare
     strategy:
       fail-fast: false
       max-parallel: 2
@@ -31,50 +93,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Download recovered 700-category baseline
+      - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: FINAL-GemsNY-Image-Audit-RECOVERED
-          path: input/baseline
-          github-token: ${{ github.token }}
-          run-id: 34626456374
-      - name: Download API exception recovery
-        uses: actions/download-artifact@v5
-        with:
-          name: GemsNY-Exception-API-Recovery
-          path: input/exception
-          github-token: ${{ github.token }}
-          run-id: 34676685429
-      - name: Download server-grid recovery
-        uses: actions/download-artifact@v5
-        with:
-          pattern: GemsNY-Server-Grid-Recovery-*
-          path: input/server
-          github-token: ${{ github.token }}
-          run-id: 34679790323
-      - name: Download valid prior partial coverage
-        uses: actions/download-artifact@v5
-        continue-on-error: true
-        with:
-          pattern: GemsNY-Remaining-Recovery-*
-          path: input/prior_remaining
-          github-token: ${{ github.token }}
-          run-id: 34731683227
-      - name: Download valid HTML partial coverage
-        uses: actions/download-artifact@v5
-        continue-on-error: true
-        with:
-          pattern: GemsNY-Remaining-HTML-Recovery-*
-          path: input/prior_latest
-          github-token: ${{ github.token }}
-          run-id: 34760058781
-      - name: Download V7 exact-API partial coverage
-        uses: actions/download-artifact@v5
-        with:
-          pattern: GemsNY-Remaining-Exact-API-V7-*
-          path: input/v7
-          github-token: ${{ github.token }}
-          run-id: 34786803872
+          name: GemsNY-V8-Recovery-Inputs
+          path: input
       - run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12' 'playwright>=1.50,<2'
       - run: python -m playwright install --with-deps chromium
       - name: Recover only still-unresolved categories from live browser/API or strict server grid
@@ -107,7 +130,7 @@ jobs:
 
   merge:
     if: always()
-    needs: recover
+    needs: [prepare, recover]
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -115,50 +138,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Download baseline
+      - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: FINAL-GemsNY-Image-Audit-RECOVERED
-          path: input/baseline
-          github-token: ${{ github.token }}
-          run-id: 34626456374
-      - name: Download exception recovery
-        uses: actions/download-artifact@v5
-        with:
-          name: GemsNY-Exception-API-Recovery
-          path: input/exception
-          github-token: ${{ github.token }}
-          run-id: 34676685429
-      - name: Download server-grid recovery
-        uses: actions/download-artifact@v5
-        with:
-          pattern: GemsNY-Server-Grid-Recovery-*
-          path: input/server
-          github-token: ${{ github.token }}
-          run-id: 34679790323
-      - name: Download prior remaining recovery
-        uses: actions/download-artifact@v5
-        continue-on-error: true
-        with:
-          pattern: GemsNY-Remaining-Recovery-*
-          path: input/prior_remaining
-          github-token: ${{ github.token }}
-          run-id: 34731683227
-      - name: Download prior HTML recovery
-        uses: actions/download-artifact@v5
-        continue-on-error: true
-        with:
-          pattern: GemsNY-Remaining-HTML-Recovery-*
-          path: input/prior_latest
-          github-token: ${{ github.token }}
-          run-id: 34760058781
-      - name: Download V7 recovery
-        uses: actions/download-artifact@v5
-        with:
-          pattern: GemsNY-Remaining-Exact-API-V7-*
-          path: input/v7
-          github-token: ${{ github.token }}
-          run-id: 34786803872
+          name: GemsNY-V8-Recovery-Inputs
+          path: input
       - name: Download all V8 shard evidence
         uses: actions/download-artifact@v5
         continue-on-error: true
