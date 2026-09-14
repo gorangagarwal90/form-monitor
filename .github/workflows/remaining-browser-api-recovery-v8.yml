@@ -1,11 +1,11 @@
-name: GemsNY Remaining Browser API Recovery V8
+name: GemsNY Remaining Browser Recovery V9
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/remaining-browser-api-recovery-v8.yml'
-      - 'remaining_browser_api_recovery_v8.py'
+      - 'remaining_browser_recovery_v9.py'
       - 'final_strict_merge_v8.py'
   workflow_dispatch:
 
@@ -14,7 +14,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: gemsny-full-image-audit-v8
+  group: gemsny-full-image-audit-v9
   cancel-in-progress: true
 
 jobs:
@@ -62,6 +62,7 @@ jobs:
           run-id: 34760058781
       - name: Download V7 exact-API partial coverage once
         uses: actions/download-artifact@v5
+        continue-on-error: true
         with:
           pattern: GemsNY-Remaining-Exact-API-V7-*
           path: input/v7
@@ -74,7 +75,7 @@ jobs:
       - name: Upload one reusable input bundle
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-V8-Recovery-Inputs
+          name: GemsNY-V9-Recovery-Inputs
           path: input/
           retention-days: 5
           if-no-files-found: error
@@ -83,9 +84,9 @@ jobs:
     needs: prepare
     strategy:
       fail-fast: false
-      max-parallel: 2
+      max-parallel: 4
       matrix:
-        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31]
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63]
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
@@ -96,15 +97,15 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V8-Recovery-Inputs
+          name: GemsNY-V9-Recovery-Inputs
           path: input
       - run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12' 'playwright>=1.50,<2'
       - run: python -m playwright install --with-deps chromium
-      - name: Recover only still-unresolved categories from live browser/API or strict server grid
+      - name: Recover only still-unresolved categories using browser-observed API pagination and live DOM
         id: audit
         continue-on-error: true
         run: |
-          python remaining_browser_api_recovery_v8.py \
+          python remaining_browser_recovery_v9.py \
             --baseline-coverage input/baseline/coverage.csv \
             --exclude-root input/exception \
             --exclude-root input/server \
@@ -113,14 +114,14 @@ jobs:
             --exclude-root input/v7 \
             --output-dir output \
             --shard-index ${{ matrix.shard }} \
-            --shard-count 32 \
+            --shard-count 64 \
             --min-width 500 \
             --min-height 500
       - name: Upload shard evidence even when unresolved
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-Remaining-Browser-API-V8-${{ matrix.shard }}
+          name: GemsNY-Remaining-Browser-V9-${{ matrix.shard }}
           path: output/
           retention-days: 5
           if-no-files-found: error
@@ -141,14 +142,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V8-Recovery-Inputs
+          name: GemsNY-V9-Recovery-Inputs
           path: input
-      - name: Download all V8 shard evidence
+      - name: Download all V9 shard evidence
         uses: actions/download-artifact@v5
         continue-on-error: true
         with:
-          pattern: GemsNY-Remaining-Browser-API-V8-*
-          path: input/v8
+          pattern: GemsNY-Remaining-Browser-V9-*
+          path: input/v9
       - run: pip install 'XlsxWriter>=3.2,<4'
       - name: Strict 700-category merge and artifact validation
         id: strictmerge
@@ -161,13 +162,13 @@ jobs:
             --recovery-root input/prior_remaining \
             --recovery-root input/prior_latest \
             --recovery-root input/v7 \
-            --recovery-root input/v8 \
+            --recovery-root input/v9 \
             --output final
       - name: Upload strict final report or failure manifest
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FINAL-GemsNY-Full-Image-Audit-500x500-V8
+          name: FINAL-GemsNY-Full-Image-Audit-500x500-V9
           path: final/
           retention-days: 14
           if-no-files-found: error
