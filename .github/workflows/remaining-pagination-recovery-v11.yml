@@ -1,10 +1,11 @@
-name: GemsNY Remaining Catalog Recovery V15
+name: GemsNY Remaining Contract Recovery V16
 
 on:
   push:
     branches: [main]
     paths:
       - '.github/workflows/remaining-pagination-recovery-v11.yml'
+      - 'remaining_catalog_recovery_v16.py'
       - 'remaining_catalog_recovery_v15.py'
       - 'remaining_api_recovery_v4.py'
       - 'remaining_catalog_recovery_v14.py'
@@ -15,7 +16,7 @@ permissions:
   actions: read
 
 concurrency:
-  group: gemsny-full-image-audit-v15
+  group: gemsny-full-image-audit-v16
   cancel-in-progress: true
 
 jobs:
@@ -109,12 +110,20 @@ jobs:
           path: input/v14prior
           github-token: ${{ github.token }}
           run-id: 34844495080
+      - name: Preserve valid V15 completions
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-Catalog-V15-*
+          path: input/v15prior
+          github-token: ${{ github.token }}
+          run-id: 34854823928
       - name: Validate baseline
         run: test -s input/baseline/coverage.csv
       - name: Upload reusable inputs
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-V15-Recovery-Inputs
+          name: GemsNY-V16-Recovery-Inputs
           path: input/
           retention-days: 5
           if-no-files-found: error
@@ -136,14 +145,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V15-Recovery-Inputs
+          name: GemsNY-V16-Recovery-Inputs
           path: input
       - run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12'
-      - name: Recover unresolved categories through strict per-category backend APIs
+      - name: Recover unresolved categories using verified backend contracts
         id: audit
         continue-on-error: true
         run: |
-          python remaining_catalog_recovery_v15.py \
+          python remaining_catalog_recovery_v16.py \
             --baseline-coverage input/baseline/coverage.csv \
             --exclude-root input/exception \
             --exclude-root input/server \
@@ -155,6 +164,7 @@ jobs:
             --exclude-root input/v12prior \
             --exclude-root input/v13prior \
             --exclude-root input/v14prior \
+            --exclude-root input/v15prior \
             --output-dir output \
             --shard-index ${{ matrix.shard }} \
             --shard-count 48 \
@@ -164,7 +174,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: GemsNY-Remaining-Catalog-V15-${{ matrix.shard }}
+          name: GemsNY-Remaining-Contract-V16-${{ matrix.shard }}
           path: output/
           retention-days: 5
           if-no-files-found: error
@@ -185,14 +195,14 @@ jobs:
       - name: Download reusable recovery inputs
         uses: actions/download-artifact@v5
         with:
-          name: GemsNY-V15-Recovery-Inputs
+          name: GemsNY-V16-Recovery-Inputs
           path: input
-      - name: Download V15 shard evidence
+      - name: Download V16 shard evidence
         uses: actions/download-artifact@v5
         continue-on-error: true
         with:
-          pattern: GemsNY-Remaining-Catalog-V15-*
-          path: input/v15
+          pattern: GemsNY-Remaining-Contract-V16-*
+          path: input/v16
       - run: pip install 'XlsxWriter>=3.2,<4'
       - name: Strict whole-site merge and validation
         id: strictmerge
@@ -210,13 +220,14 @@ jobs:
             --recovery-root input/v12prior \
             --recovery-root input/v13prior \
             --recovery-root input/v14prior \
-            --recovery-root input/v15 \
+            --recovery-root input/v15prior \
+            --recovery-root input/v16 \
             --output final
       - name: Upload final report or strict failure manifest
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: FINAL-GemsNY-Full-Image-Audit-500x500-V15
+          name: FINAL-GemsNY-Full-Image-Audit-500x500-V16
           path: final/
           retention-days: 14
           if-no-files-found: error
