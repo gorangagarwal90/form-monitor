@@ -68,7 +68,7 @@ jobs:
         id: audit
         continue-on-error: true
         run: |
-          python remaining_browser_recovery_v12.py \
+          xvfb-run -a python remaining_browser_recovery_v13.py \
             --baseline-coverage input/baseline/coverage.csv \
             --exclude-root input/exception --exclude-root input/server \
             --exclude-root input/prior_remaining --exclude-root input/prior_latest \
