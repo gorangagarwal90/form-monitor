@@ -12,6 +12,9 @@ import remaining_api_recovery_v4 as v4
 import remaining_catalog_recovery_v21 as v21
 import remaining_catalog_recovery_v23 as v23
 
+# Preserve the original V21 candidate generator before V24 installs its wrapper.
+_BASE_CANDIDATES = v21.candidates
+
 
 def canonical_url(d):
     u=v4.product_url(d) or ''
@@ -26,14 +29,12 @@ def canonical_url(d):
 def semantic_filter_safe(row,seen,expected=None):
     f=v23.semantic_filter(row,seen)
     if not expected:return f
-    # Never apply a semantic dimension when the payload lacks enough exact
-    # metadata and filtering makes the strict baseline mismatch worse.
     if abs(len(f)-expected) < abs(len(seen)-expected):return f
     return seen
 
 
 def candidates_v24(row):
-    out=list(v21.candidates(row))
+    out=list(_BASE_CANDIDATES(row))
     gem,typ,loose,style=v4.infer(row)
     if loose and gem and gem.startswith('lab-diamond'):
         for ep in ('/diamond','/diamond/v2','/v2/diamond','/v3/diamond','/lab-diamond','/lab-diamond/v2'):
@@ -44,7 +45,6 @@ def candidates_v24(row):
 
 
 def probe_v24(sess,row,expected):
-    # Temporarily expose V24 candidates to the proven V23 probe scorer.
     old=v21.candidates
     try:
         v21.candidates=candidates_v24
@@ -60,8 +60,6 @@ def enumerate_v24(sess,sel,expected):
     if row and seen:
         seen=semantic_filter_safe(row,seen,expected)
     if expected and len(seen)>expected:
-        # Some endpoints expose duplicate variants with distinct internal IDs but
-        # the same canonical PDP. Collapse only if this produces the exact gate.
         byurl={}
         for k,d in seen.items():
             u=canonical_url(d)
