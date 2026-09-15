@@ -1,0 +1,153 @@
+name: GemsNY Remaining Exact Count Recovery V24
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/remaining-exact-recovery-v24.yml'
+      - 'remaining_catalog_recovery_v24.py'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: gemsny-full-image-audit-v24
+  cancel-in-progress: true
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - name: Wait for V23 to finish so completed evidence is preserved
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for i in $(seq 1 140); do
+            status=$(gh api repos/${{ github.repository }}/actions/runs/34910178218 --jq .status || true)
+            echo "V23 status=$status"
+            [ "$status" = "completed" ] && exit 0
+            sleep 15
+          done
+          exit 1
+      - name: Reuse V23 input bundle
+        uses: actions/download-artifact@v5
+        with:
+          name: GemsNY-V23-Recovery-Inputs
+          path: input
+          github-token: ${{ github.token }}
+          run-id: 34910178218
+      - name: Preserve finalized V23 shards
+        uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-Semantic-V23-*
+          path: input/v23
+          github-token: ${{ github.token }}
+          run-id: 34910178218
+      - run: test -s input/baseline/coverage.csv
+      - uses: actions/upload-artifact@v4
+        with:
+          name: GemsNY-V24-Recovery-Inputs
+          path: input/
+          retention-days: 5
+          if-no-files-found: error
+
+  recover:
+    needs: prepare
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19,20,21,22,23,24,25,26,27,28,29,30,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,88,89,90,91,92,93,94,95]
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v5
+        with:
+          name: GemsNY-V24-Recovery-Inputs
+          path: input
+      - run: pip install 'requests>=2.31,<3' 'Pillow>=10,<12'
+      - name: Recover only unresolved exact-count categories
+        id: audit
+        continue-on-error: true
+        run: |
+          python remaining_catalog_recovery_v24.py \
+            --baseline-coverage input/baseline/coverage.csv \
+            --exclude-root input/exception --exclude-root input/server \
+            --exclude-root input/prior_remaining --exclude-root input/prior_latest \
+            --exclude-root input/v7 --exclude-root input/v9 \
+            --exclude-root input/v11prior --exclude-root input/v12prior \
+            --exclude-root input/v13prior --exclude-root input/v14prior \
+            --exclude-root input/v15prior --exclude-root input/v16prior \
+            --exclude-root input/v17prior --exclude-root input/v18prior \
+            --exclude-root input/v19prior --exclude-root input/v20prior \
+            --exclude-root input/v21 --exclude-root input/v22 --exclude-root input/v23 \
+            --output-dir output --shard-index ${{ matrix.shard }} --shard-count 96 \
+            --min-width 500 --min-height 500
+      - name: Upload shard evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: GemsNY-Remaining-Exact-V24-${{ matrix.shard }}
+          path: output/
+          retention-days: 5
+          if-no-files-found: error
+      - name: Fail shard when unresolved coverage remains
+        if: steps.audit.outcome != 'success'
+        run: exit 2
+
+  merge:
+    if: always()
+    needs: [prepare, recover]
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v5
+        with:
+          name: GemsNY-V24-Recovery-Inputs
+          path: input
+      - uses: actions/download-artifact@v5
+        continue-on-error: true
+        with:
+          pattern: GemsNY-Remaining-Exact-V24-*
+          path: input/v24
+      - run: pip install 'XlsxWriter>=3.2,<4'
+      - name: Strict whole-site merge and validation
+        id: strictmerge
+        continue-on-error: true
+        run: |
+          python final_strict_merge_v9.py \
+            --baseline input/baseline \
+            --recovery-root input/exception --recovery-root input/server \
+            --recovery-root input/prior_remaining --recovery-root input/prior_latest \
+            --recovery-root input/v7 --recovery-root input/v9 \
+            --recovery-root input/v11prior --recovery-root input/v12prior \
+            --recovery-root input/v13prior --recovery-root input/v14prior \
+            --recovery-root input/v15prior --recovery-root input/v16prior \
+            --recovery-root input/v17prior --recovery-root input/v18prior \
+            --recovery-root input/v19prior --recovery-root input/v20prior \
+            --recovery-root input/v21 --recovery-root input/v22 \
+            --recovery-root input/v23 --recovery-root input/v24 --output final
+      - name: Upload final report or strict failure manifest
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: FINAL-GemsNY-Full-Image-Audit-500x500-V24
+          path: final/
+          retention-days: 14
+          if-no-files-found: error
+      - name: Fail merge unless strict validation passes
+        if: steps.strictmerge.outcome != 'success'
+        run: exit 2
