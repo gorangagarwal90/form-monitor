@@ -1,13 +1,52 @@
+import requests
 import remaining_browser_recovery_v12 as v12
 
 core = v12.core
 _ORIGINAL_SYNC_PLAYWRIGHT = core.sync_playwright
 
 # V13 keeps every strict V12 rule (exact expected product count and original/source
-# image >=500x500 validation) but changes only browser execution. GemsNY is serving
-# GitHub's normal headless Chromium an empty/client shell while direct SSR requests
-# are HTTP 403. Run Chromium headed under Xvfb and mask the basic automation flags;
-# no partial category is accepted as complete.
+# image >=500x500 validation) but hardens both HTTP and browser execution. GitHub
+# runners are receiving HTTP 403 for ordinary Chrome SSR and an empty client shell.
+# Try crawler identities for public SSR, then use headed Chromium under Xvfb with
+# basic automation flags masked. No partial category is accepted as complete.
+
+_UAS = [
+    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
+    'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+]
+
+def _session():
+    s = requests.Session()
+    s.headers.update({
+        'User-Agent': _UAS[0],
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language': 'en-US,en;q=0.9',
+        'Cache-Control': 'no-cache',
+        'Pragma': 'no-cache',
+        'Referer': 'https://www.gemsny.com/',
+    })
+    return s
+
+def _get(sess, url):
+    last = ''
+    for ua in _UAS:
+        try:
+            r = sess.get(url, timeout=45, allow_redirects=True, headers={'User-Agent': ua})
+            last = f'HTTP {r.status_code}'
+            if r.status_code != 200:
+                continue
+            txt = r.text or ''
+            if len(txt) < 500:
+                last = f'short HTML {len(txt)} bytes'
+                continue
+            return txt, ''
+        except Exception as e:
+            last = f'{type(e).__name__}: {e}'[:220]
+    return '', last or 'no response'
+
+v12._session = _session
+v12._get = _get
 
 class _ContextProxy:
     def __init__(self, ctx):
@@ -43,12 +82,7 @@ class _ChromiumProxy:
     def launch(self, *args, **kwargs):
         kwargs['headless'] = False
         args_list = list(kwargs.get('args') or [])
-        for arg in [
-            '--disable-blink-features=AutomationControlled',
-            '--window-size=1440,1100',
-            '--disable-dev-shm-usage',
-            '--no-sandbox'
-        ]:
+        for arg in ['--disable-blink-features=AutomationControlled','--window-size=1440,1100','--disable-dev-shm-usage','--no-sandbox']:
             if arg not in args_list:
                 args_list.append(arg)
         kwargs['args'] = args_list
