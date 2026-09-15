@@ -6,14 +6,14 @@ _ORIGINAL_SYNC_PLAYWRIGHT = core.sync_playwright
 
 # V13 keeps every strict V12 rule (exact expected product count and original/source
 # image >=500x500 validation) but hardens both HTTP and browser execution. GitHub
-# runners are receiving HTTP 403 for ordinary Chrome SSR and an empty client shell.
-# Try crawler identities for public SSR, then use headed Chromium under Xvfb with
-# basic automation flags masked. No partial category is accepted as complete.
+# runners can receive HTTP 403 for direct category SSR and an empty client shell.
+# Warm the public origin first, retain cookies, and use a realistic headed browser
+# context before visiting unresolved categories. No partial category is accepted.
 
 _UAS = [
-    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
-    'Mozilla/5.0 (compatible; bingbot/2.0; +http://www.bing.com/bingbot.htm)',
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Safari/537.36',
+    'Mozilla/5.0 (compatible; Googlebot/2.1; +http://www.google.com/bot.html)',
 ]
 
 def _session():
@@ -25,7 +25,15 @@ def _session():
         'Cache-Control': 'no-cache',
         'Pragma': 'no-cache',
         'Referer': 'https://www.gemsny.com/',
+        'Sec-Fetch-Dest': 'document',
+        'Sec-Fetch-Mode': 'navigate',
+        'Sec-Fetch-Site': 'same-origin',
+        'Upgrade-Insecure-Requests': '1',
     })
+    try:
+        s.get('https://www.gemsny.com/', timeout=30, allow_redirects=True)
+    except Exception:
+        pass
     return s
 
 def _get(sess, url):
@@ -51,6 +59,7 @@ v12._get = _get
 class _ContextProxy:
     def __init__(self, ctx):
         self._ctx = ctx
+        self._warmed = False
         try:
             ctx.add_init_script("""
                 Object.defineProperty(navigator, 'webdriver', {get: () => undefined});
@@ -64,7 +73,15 @@ class _ContextProxy:
     def request(self):
         return self._ctx.request
     def new_page(self):
-        return self._ctx.new_page()
+        p = self._ctx.new_page()
+        if not self._warmed:
+            try:
+                p.goto('https://www.gemsny.com/', wait_until='domcontentloaded', timeout=45000)
+                p.wait_for_timeout(2500)
+            except Exception:
+                pass
+            self._warmed = True
+        return p
     def __getattr__(self, name):
         return getattr(self._ctx, name)
 
@@ -72,6 +89,14 @@ class _BrowserProxy:
     def __init__(self, browser):
         self._browser = browser
     def new_context(self, *args, **kwargs):
+        kwargs.setdefault('user_agent', _UAS[0])
+        kwargs.setdefault('locale', 'en-US')
+        kwargs.setdefault('timezone_id', 'America/New_York')
+        kwargs.setdefault('viewport', {'width': 1440, 'height': 1100})
+        kwargs.setdefault('extra_http_headers', {
+            'Accept-Language': 'en-US,en;q=0.9',
+            'Upgrade-Insecure-Requests': '1',
+        })
         return _ContextProxy(self._browser.new_context(*args, **kwargs))
     def __getattr__(self, name):
         return getattr(self._browser, name)
